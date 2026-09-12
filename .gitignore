@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Runtime persistence (user data, regenerated)
+rumpus-setup.json
+rumpus-settings.json
+rumpus-game.json
+
+# Media / assets that must be dropped in (large binaries, photos, music)
+web/assets/photos/*.jpg
+web/assets/photos/*.jpeg
+web/assets/music/*.mp3
+web/assets/music/*.ogg
+web/assets/sfx/*.mp3
+web/assets/sfx/*.wav
+web/assets/sfx/*.ogg
+
+# Bundled fonts are committed (small, OFL-licensed); only ad-hoc fonts are ignored
+web/assets/fonts/*.ttf
+web/assets/fonts/*.otf
+!web/assets/fonts/*.woff2
+!web/assets/**/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

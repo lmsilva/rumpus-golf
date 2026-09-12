@@ -1,0 +1,15 @@
+# Rumpus Golf — Python 3.11+
+# Core runtime (required)
+numpy>=1.24
+opencv-python>=4.8
+
+# Local web server + websocket (required)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# Optional sensor drivers (only needed when real hardware is attached)
+#   Kinect v1 (Xbox 360): libfreenect + Python bindings
+#   Kinect v2 (Xbox One):  pylibfreenect2
+# These are Windows-only-ish / hard to pip-install; install per backend README.
+# libfreenect
+# pylibfreenect2

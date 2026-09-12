@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rumpus-settings",
+  "type": "object",
+  "properties": {
+    "theme": {
+      "enum": [
+        "dark",
+        "light",
+        "auto"
+      ],
+      "default": "dark"
+    },
+    "music": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.62
+        },
+        "playlist": {
+          "enum": [
+            "lounge-jazz",
+            "lofi-hiphop",
+            "both-shuffled",
+            "custom"
+          ],
+          "default": "lounge-jazz"
+        },
+        "customFolder": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "sfx": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.8
+        },
+        "announcer": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "properties": {
+        "rumble": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "showCameraFeed": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "holes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9,
+          "default": 3
+        },
+        "strokeCap": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 12,
+          "default": 8
+        },
+        "oobPenalty": {
+          "type": "boolean",
+          "default": true
+        },
+        "tunnelBonus": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  }
+}

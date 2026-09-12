@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12;color:#f2efe8;font-family:Manrope,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#8be9c3;text-underline-offset:3px}a:hover{color:#c4f5e0}
+@keyframes rg-flash{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes rg-pulse{0%{transform:scale(1);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+@keyframes rg-marquee{0%,20%{transform:translateX(0)}80%,100%{transform:translateX(-58%)}}
+</style>
+</helmet>
+
+<!-- DOC HEADER -->
+<section style="padding:48px 56px 40px;border-bottom:1px solid rgba(242,239,232,.1);display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:48px;max-width:1920px">
+  <div>
+    <div style="font:600 12px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3;margin-bottom:14px">Rumpus Golf · Golden thread · v2 — “late night lounge”</div>
+    <h1 style="font:800 56px/1 Outfit;letter-spacing:-.03em;margin:0 0 16px">Turn any floor into a mini golf course.</h1>
+    <p style="font:400 15px/1.6 Manrope;color:#a3a8b4;max-width:580px;margin:0">The 18 screens of <a href="Rumpus Golf Flow.dc.html">v1</a> plus <a href="#s19">Settings</a>, <a href="#s20">Credits</a>, <a href="#s21">What’s new</a> and the obstacle flow (<a href="#s07b">detect</a> → <a href="#s07c">correct</a> → <a href="#s11b">hidden ball / new object</a>), restyled: a warm charcoal ground so the camera feed and the ball colors carry the room, mint for every “go” action, soft 16–28px corners, glass panels over the feed. Hints switch to Xbox glyphs the moment a controller is detected (tweak: Input mode).</p>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:24px">
+      <span style="width:32px;height:32px;border-radius:50%;background:#ff8a3d"></span><span style="width:32px;height:32px;border-radius:50%;background:#ff5fa8"></span><span style="width:32px;height:32px;border-radius:50%;background:#5b8cff"></span><span style="width:32px;height:32px;border-radius:50%;background:#ffd84d"></span>
+      <span style="width:32px;height:32px;border-radius:8px;background:#8be9c3;margin-left:12px"></span><span style="width:32px;height:32px;border-radius:8px;background:#ff6b57"></span>
+      <span style="font:600 12px Manrope;margin-left:10px;color:#a3a8b4">Players · go · warn. No green ball (it’s the cup’s color).</span>
+    </div>
+  </div>
+  <div style="font:400 13px/1.55 Manrope;color:#a3a8b4">
+    <div style="font:700 13px Outfit;color:#f2efe8;border-bottom:1px solid rgba(242,239,232,.15);padding-bottom:8px;margin-bottom:10px">Controller hints</div>
+    <div style="display:grid;gap:8px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#3aa655;color:#fff;display:grid;place-items:center;font:800 13px Outfit">A</span>Confirm</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#e04343;color:#fff;display:grid;place-items:center;font:800 13px Outfit">B</span>Back</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#3d7dff;color:#fff;display:grid;place-items:center;font:800 13px Outfit">X</span>Alt / Undo</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#f2c230;color:#15171c;display:grid;place-items:center;font:800 13px Outfit">Y</span>Secondary</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="height:26px;padding:0 8px;border-radius:8px;background:#3a3f4a;color:#fff;display:grid;place-items:center;font:800 12px Outfit">LB</span><span style="height:26px;padding:0 8px;border-radius:8px;background:#3a3f4a;color:#fff;display:grid;place-items:center;font:800 12px Outfit">RB</span>Prev / next</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#3a3f4a;color:#fff;display:grid;place-items:center;font:800 13px Outfit">≡</span>Menu / pause</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font:600 12px Manrope;color:#f2efe8"><span style="width:26px;height:26px;border-radius:50%;background:#3a3f4a;color:#fff;display:grid;place-items:center;font:800 13px Outfit">L</span>Stick · move</span>
+      </div>
+      <div>Glyphs appear only while a controller is connected (Gamepad API “connected” event); otherwise the same slots show keycaps. A small controller badge sits in every top bar.</div>
+      <div style="font:700 13px Outfit;color:#f2efe8;border-bottom:1px solid rgba(242,239,232,.15);padding:14px 0 8px;margin-bottom:10px">Overflow rule</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px"><span style="display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;background:#1e2128;border:1px solid rgba(242,239,232,.12);width:220px;max-width:100%;box-sizing:border-box"><span style="width:14px;height:14px;border-radius:50%;background:#ff5fa8;flex:none"></span><span style="overflow:hidden;white-space:nowrap;min-width:0"><span style="display:inline-block;font:700 16px Outfit;color:#f2efe8;animation:rg-marquee 6s ease-in-out infinite alternate">Grandma Josephine Okonkwo-Brightwater</span></span></span><span>Text never wraps, clips or overlaps. Anything wider than its slot (names, hints, course titles) scrolls gently end-to-end and back, pausing at each end so it stays readable. Nothing gets an ellipsis.</span></div>
+    </div>
+  </div>
+  <div style="font:400 13px/1.55 Manrope;color:#a3a8b4">
+    <div style="font:700 13px Outfit;color:#f2efe8;border-bottom:1px solid rgba(242,239,232,.15);padding-bottom:8px;margin-bottom:10px">Soundtrack preview · CC BY 4.0</div>
+    <div style="display:grid;gap:10px">
+      <div><div style="font:600 13px Manrope;color:#f2efe8">Lobby Time — Kevin MacLeod</div><audio controls preload="none" src="https://incompetech.com/music/royalty-free/mp3-royaltyfree/Lobby%20Time.mp3" style="width:100%;height:32px;margin-top:4px"></audio></div>
+      <div><div style="font:600 13px Manrope;color:#f2efe8">Backed Vibes Clean — Kevin MacLeod</div><audio controls preload="none" src="https://incompetech.com/music/royalty-free/mp3-royaltyfree/Backed%20Vibes%20Clean.mp3" style="width:100%;height:32px;margin-top:4px"></audio></div>
+      <div>Full asset list at the <a href="#assets">bottom</a>.</div>
+    </div>
+  </div>
+</section>
+
+<!-- A · BOOT -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">A</span><span style="font:700 18px Outfit">Boot</span><span style="font:400 13px Manrope;color:#a3a8b4">Start · sensor check · verify</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S01 -->
+    <div id="s01" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s01" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S01</a>Start screen<span style="color:#a3a8b4;font-weight:400">— music fades in here</span></div>
+      <div data-screen-label="S01 Start" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <img alt="Mini golf putter and ball on turf — Alex Gruber, Unsplash" src="https://unsplash.com/photos/VlOzMQl2O3s/download?w=1600" style="position:absolute;right:0;top:0;width:1040px;height:100%;object-fit:cover;filter:saturate(.75) brightness(.8)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,#15171c 0 780px,rgba(21,23,28,.85) 980px,rgba(21,23,28,.15) 1500px)"></div>
+        <div style="position:absolute;inset:0;padding:72px 96px;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:12px"><span style="width:28px;height:28px;border-radius:50%;background:#ff8a3d"></span><span style="width:28px;height:28px;border-radius:50%;background:#ff5fa8"></span><span style="width:28px;height:28px;border-radius:50%;background:#5b8cff"></span><span style="width:28px;height:28px;border-radius:50%;background:#ffd84d"></span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 16px Manrope;color:#a3a8b4;background:rgba(242,239,232,.06);border:1px solid rgba(242,239,232,.12);padding:8px 14px;border-radius:999px"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span></div>
+          <div style="margin-top:auto">
+            <div style="font:800 200px/1 Outfit;letter-spacing:-.05em">Rumpus<br>Golf</div>
+            <div style="font:400 32px/1.3 Manrope;color:#a3a8b4;margin-top:28px;max-width:720px">Turn any floor into a mini golf course.</div>
+          </div>
+          <div style="display:grid;gap:12px;margin-top:56px;max-width:560px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 28px;border-radius:18px;font:700 28px Outfit"><span>New game</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope"><span style="min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></span></div>
+            <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:20px 28px;border-radius:18px;font:700 28px Outfit"><span>Load last setup</span><span style="margin-left:auto;font:400 17px Manrope;color:#a3a8b4">Living room · 3 courses · Sep 9</span></div>
+            <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:20px 28px;border-radius:18px;font:700 28px Outfit">Course library</div>
+            <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:20px 28px;border-radius:18px;font:700 28px Outfit">Settings</div>
+          </div>
+        </div>
+        <div style="position:absolute;right:56px;bottom:48px;display:flex;align-items:center;gap:14px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:14px 20px;border-radius:999px;font:600 17px Manrope;color:#f2efe8"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>Kinect v1 connected<span style="color:#a3a8b4;margin-left:8px">·  Lobby Time — Kevin MacLeod</span></div>
+      </div>
+    </div>
+
+    <!-- S02 -->
+    <div id="s02" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s02" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S02</a>Sensor check + load saved setup</div>
+      <div data-screen-label="S02 Sensor" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-rows:96px 1fr">
+        <div style="display:flex;align-items:center;gap:24px;padding:0 56px;border-bottom:1px solid rgba(242,239,232,.1);font:700 22px Outfit"><span>Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">New game</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 15px Manrope;color:#a3a8b4"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span><span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#a3a8b4"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.b.g }}</span>Back</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px">
+          <div style="background:#1e2128;border-radius:24px;padding:56px 64px;display:flex;flex-direction:column">
+            <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Sensor</div>
+            <h2 style="font:800 80px/1 Outfit;letter-spacing:-.035em;margin:14px 0 36px">Kinect v1<br>found.</h2>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 Manrope">
+              <span style="color:#a3a8b4">Depth</span><span>640 × 480</span><span style="color:#a3a8b4">Color</span><span>640 × 480</span><span style="color:#a3a8b4">Field of view</span><span>57° horizontal</span><span style="color:#a3a8b4">Reliable range</span><span>0.8 – 4.0 m</span><span style="color:#a3a8b4">Note</span><span>Struggles in direct sunlight — draw the curtains.</span>
+            </div>
+            <div style="margin-top:auto;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.4);border-radius:18px;padding:24px 28px;display:flex;gap:18px"><span style="width:12px;height:12px;border-radius:50%;background:#ff6b57;flex:none;margin-top:10px"></span><div><div style="font:700 22px Outfit">Error state — no sensor</div><div style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin-top:4px">“No camera found. Plug in a Kinect v1 or v2 and press Retry.” Nothing else is reachable until a sensor answers.</div></div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:20px">
+            <div style="background:#8be9c3;color:#0f1a15;border-radius:24px;padding:40px 44px;flex:1;display:flex;flex-direction:column">
+              <div style="font:800 40px Outfit;letter-spacing:-.02em">Load saved setup</div>
+              <div style="font:400 21px/1.45 Manrope;margin-top:8px;opacity:.8">Living room · 3.1 × 2.2 m · 3 courses · 4 balls<br>saved Sep 9, 20:14</div>
+              <span style="margin-top:auto;display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope"><span style="min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span>Load</span>
+            </div>
+            <div style="position:relative;overflow:hidden;border-radius:24px;flex:1;display:flex;flex-direction:column">
+              <img alt="Living room with a large window — Minh Pham, Unsplash" src="https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.7)">
+              <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.92) 0%,rgba(21,23,28,.75) 55%,rgba(21,23,28,.35) 100%)"></div>
+              <div style="position:relative;padding:40px 44px;flex:1;display:flex;flex-direction:column">
+              <div style="font:800 40px Outfit;letter-spacing:-.02em">New calibration</div>
+              <div style="font:400 21px/1.45 Manrope;margin-top:8px;color:#d8d5cd">Five steps, about 3 minutes. Clear the floor first.</div>
+              <span style="margin-top:auto;display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#a3a8b4"><span style="min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.y.g }}</span>Start fresh</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S03 -->
+    <div id="s03" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s03" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S03</a>Verify calibration<span style="color:#a3a8b4;font-weight:400">— saved zones and obstacle footprints over the live feed</span></div>
+      <div data-screen-label="S03 Verify" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="#f2efe8" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3"><polygon points="{{ o.pts }}" fill="rgba(242,239,232,.08)" stroke="rgba(242,239,232,.7)" stroke-width="3" stroke-linejoin="round"></polygon></sc-for>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="rgba(242,239,232,.1)" stroke="#f2efe8" stroke-width="3"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.25)" stroke="#8be9c3" stroke-width="4"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="14" fill="#f2efe8"></circle>
+        </svg>
+        <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3"><div style="position:absolute;left:{{ o.xp }}%;top:{{ o.yp }}%;transform:translateY(-100%);font:700 22px/1.2 Outfit;color:rgba(242,239,232,.8);white-space:nowrap">{{ o.label }}</div></sc-for>
+        <div style="position:absolute;left:56px;right:56px;top:48px;display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:32px 40px;max-width:900px"><div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Verify · Living room</div><div style="font:800 60px/1 Outfit;letter-spacing:-.03em;margin-top:10px">Do the lines still sit on the floor?</div><div style="font:400 21px/1.45 Manrope;color:#a3a8b4;margin-top:14px">White = play area, start and the obstacles you confirmed. Mint = hole. If only something moved, Recalibrate lets you redo just that — cup, obstacles or zones.</div></div>
+          <span style="font:600 15px Manrope;color:#a3a8b4;background:rgba(21,23,28,.7);border:1px solid rgba(242,239,232,.12);padding:10px 16px;border-radius:999px">LIVE · 640 × 480 · 30 fps</span>
+        </div>
+        <div style="position:absolute;left:56px;right:56px;bottom:48px;display:flex;gap:14px">
+          <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:400px"><span>Looks right</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+          <div style="display:flex;align-items:center;gap:16px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:400px"><span>Recalibrate</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.x.g }}</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- B · CALIBRATION -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">B</span><span style="font:700 18px Outfit">Calibration &amp; course setup</span><span style="font:400 13px Manrope;color:#a3a8b4">Five steps · progress pills along the top · every step re-enterable from Pause</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S04 -->
+    <div id="s04" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s04" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S04</a>Step 1 · Empty floor snapshot</div>
+      <div data-screen-label="S04 Floor" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-rows:96px 1fr">
+        <div style="display:flex;align-items:center;gap:24px;padding:0 56px;border-bottom:1px solid rgba(242,239,232,.1);font:700 22px Outfit"><span>Rumpus Golf</span>
+          <div style="display:flex;gap:8px;margin-left:24px"><sc-for list="{{ steps1 }}" as="s" hint-placeholder-count="5"><span style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 8px;border-radius:999px;background:{{ s.bg }};color:{{ s.fg }};font:600 15px Manrope;border:1px solid {{ s.bd }}"><span style="width:24px;height:24px;border-radius:50%;background:{{ s.nbg }};color:{{ s.nfg }};display:grid;place-items:center;font:800 13px Outfit">{{ s.n }}</span>{{ s.t }}</span></sc-for></div>
+          <span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 15px Manrope;color:#a3a8b4"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px">
+          <div style="position:relative;background:#242629;overflow:hidden;border-radius:24px">
+            <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+            <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+              <rect x="0" y="0" width="1920" height="230" fill="rgba(13,15,18,.6)"></rect><rect x="0" y="1000" width="1920" height="80" fill="rgba(13,15,18,.6)"></rect>
+              <line x1="0" y1="230" x2="1920" y2="230" stroke="#8be9c3" stroke-width="3"></line><line x1="0" y1="1000" x2="1920" y2="1000" stroke="#8be9c3" stroke-width="3"></line>
+              <text x="48" y="200" fill="#f2efe8" font-family="Manrope" font-weight="600" font-size="30">4.0 m — too far for reliable depth</text>
+              <text x="48" y="1050" fill="#f2efe8" font-family="Manrope" font-weight="600" font-size="30">0.8 m — too close</text>
+              <text x="48" y="290" fill="#8be9c3" font-family="Outfit" font-weight="700" font-size="30">Good floor — fit a course inside this band</text>
+            </svg>
+            <span style="position:absolute;right:24px;top:24px;font:600 15px Manrope;color:#a3a8b4;background:rgba(21,23,28,.7);border:1px solid rgba(242,239,232,.12);padding:10px 16px;border-radius:999px">LIVE</span>
+          </div>
+          <div style="background:#1e2128;border-radius:24px;padding:44px;display:flex;flex-direction:column">
+            <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Step 1 of 5</div>
+            <h2 style="font:800 56px/1 Outfit;letter-spacing:-.03em;margin:14px 0 20px">Clear the floor.</h2>
+            <p style="font:400 21px/1.45 Manrope;color:#a3a8b4;margin:0">Remove balls, cup, obstacles, feet. We photograph the bare floor once so anything added later shows up as “above floor”.</p>
+            <div style="margin-top:auto;display:grid;gap:12px">
+              <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 28px;border-radius:18px;font:700 28px Outfit"><span>Capture floor</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+              <div style="font:400 15px/1.45 Manrope;color:#a3a8b4">Averages 2 s of depth frames, then fits the floor plane. A mint progress line runs along the top of the feed.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S05 -->
+    <div id="s05" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s05" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S05</a>Step 2 · Play area<span style="color:#a3a8b4;font-weight:400">— corners drag; presets for room sizes</span></div>
+      <div data-screen-label="S05 Play area" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-rows:96px 1fr">
+        <div style="display:flex;align-items:center;gap:24px;padding:0 56px;border-bottom:1px solid rgba(242,239,232,.1);font:700 22px Outfit"><span>Rumpus Golf</span>
+          <div style="display:flex;gap:8px;margin-left:24px"><sc-for list="{{ steps2 }}" as="s" hint-placeholder-count="5"><span style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 8px;border-radius:999px;background:{{ s.bg }};color:{{ s.fg }};font:600 15px Manrope;border:1px solid {{ s.bd }}"><span style="width:24px;height:24px;border-radius:50%;background:{{ s.nbg }};color:{{ s.nfg }};display:grid;place-items:center;font:800 13px Outfit">{{ s.n }}</span>{{ s.t }}</span></sc-for></div>
+          <span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 15px Manrope;color:#a3a8b4"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px">
+          <div style="position:relative;background:#242629;overflow:hidden;border-radius:24px">
+            <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+            <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+              <rect x="0" y="0" width="1920" height="230" fill="rgba(13,15,18,.6)"></rect><rect x="0" y="1000" width="1920" height="80" fill="rgba(13,15,18,.6)"></rect>
+              <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.07)" stroke="#f2efe8" stroke-width="4" stroke-linejoin="round"></polygon>
+              <circle cx="420" cy="300" r="22" fill="#8be9c3"></circle><circle cx="1500" cy="300" r="18" fill="#f2efe8"></circle><circle cx="1760" cy="980" r="18" fill="#f2efe8"></circle><circle cx="160" cy="980" r="18" fill="#f2efe8"></circle>
+              <text x="960" y="272" text-anchor="middle" fill="#f2efe8" font-family="Outfit" font-weight="700" font-size="34">3.1 m</text>
+              <text x="1720" y="640" fill="#f2efe8" font-family="Outfit" font-weight="700" font-size="34">2.2 m</text>
+              <text x="460" y="270" fill="#8be9c3" font-family="Manrope" font-weight="600" font-size="26">dragging corner 1</text>
+            </svg>
+            <div style="position:absolute;left:24px;bottom:24px;display:flex;gap:10px">
+              <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.ls.r }};background:{{ H.ls.bg }};color:{{ H.ls.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.ls.g }}</span>Move corner</span>
+              <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.a.g }}</span>Place</span>
+              <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.x.g }}</span>Undo corner</span>
+              <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.y.g }}</span>Close shape</span>
+            </div>
+            <span style="position:absolute;right:24px;top:24px;font:600 15px Manrope;color:#a3a8b4;background:rgba(21,23,28,.7);border:1px solid rgba(242,239,232,.12);padding:10px 16px;border-radius:999px">LIVE</span>
+          </div>
+          <div style="background:#1e2128;border-radius:24px;padding:44px;display:flex;flex-direction:column">
+            <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Step 2 of 5</div>
+            <h2 style="font:800 56px/1 Outfit;letter-spacing:-.03em;margin:14px 0 20px">Mark the course edge.</h2>
+            <p style="font:400 21px/1.45 Manrope;color:#a3a8b4;margin:0 0 28px">Click four or more corners on the floor. Balls stopping outside are out of bounds.</p>
+            <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;margin-bottom:10px">Start from a preset</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:16px">
+              <div style="padding:14px;border-radius:12px;font:700 18px Outfit">Small<div style="font:400 14px Manrope;color:#a3a8b4">2 × 1.5 m</div></div>
+              <div style="padding:14px;border-radius:12px;font:700 18px Outfit;background:#f2efe8;color:#15171c">Medium<div style="font:400 14px Manrope;opacity:.6">3 × 2 m</div></div>
+              <div style="padding:14px;border-radius:12px;font:700 18px Outfit">Large<div style="font:400 14px Manrope;color:#a3a8b4">4 × 2.5 m</div></div>
+            </div>
+            <div style="margin-top:auto;display:grid;gap:12px">
+              <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 28px;border-radius:18px;font:700 28px Outfit"><span>Use this area</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+              <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:18px 28px;border-radius:18px;font:700 22px Outfit"><span>Clear corners</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.x.g }}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S06 -->
+    <div id="s06" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s06" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S06</a>Step 3 · Pick a course</div>
+      <div data-screen-label="S06 Course pick" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-rows:96px 1fr">
+        <img alt="Pink mini golf castle with a windmill — mark tulin, Unsplash" src="https://images.unsplash.com/photo-1647884756876-9b230e2f75a9?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.28;filter:saturate(.8)">
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(21,23,28,.4),rgba(21,23,28,.92) 60%)"></div>
+        <div style="position:relative;display:flex;align-items:center;gap:24px;padding:0 56px;border-bottom:1px solid rgba(242,239,232,.1);font:700 22px Outfit"><span>Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">Step 3 of 5 · Course</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 15px Manrope;color:#a3a8b4"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span><span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#a3a8b4"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.lb.r }};background:{{ H.lb.bg }};color:{{ H.lb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.lb.g }}</span><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.rb.r }};background:{{ H.rb.bg }};color:{{ H.rb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.rb.g }}</span>Browse</span></div>
+        <div style="position:relative;padding:40px 56px 48px;display:flex;flex-direction:column">
+          <h2 style="font:800 60px/1 Outfit;letter-spacing:-.03em;margin:0 0 8px">Pick a course for hole 1.</h2>
+          <p style="font:400 21px/1.45 Manrope;color:#a3a8b4;margin:0 0 28px">Drawn for your 3.1 × 2.2 m area. You’ll place the real objects next and can nudge anything.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;flex:1">
+            <sc-for list="{{ courses }}" as="c" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;border-radius:24px;background:{{ c.cardBg }};color:{{ c.cardFg }};border:2px solid {{ c.cardBd }};padding:28px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline"><div><div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;opacity:.7">{{ c.level }}</div><div style="font:800 40px/1 Outfit;letter-spacing:-.02em;margin-top:6px">{{ c.name }}</div></div><div style="font:700 24px Outfit;padding:6px 14px;border-radius:999px;background:{{ c.parBg }};color:{{ c.parFg }}">Par {{ c.par }}</div></div>
+                <div style="margin-top:20px;aspect-ratio:3/2;position:relative;background:{{ c.mapBg }};border-radius:16px;overflow:hidden">
+                  <sc-for list="{{ c.obs }}" as="o" hint-placeholder-count="3"><div style="position:absolute;left:{{ o.x }}%;top:{{ o.y }}%;width:{{ o.w }}%;height:{{ o.h }}%;background:{{ o.fill }};border-radius:4px"></div></sc-for>
+                  <div style="position:absolute;left:{{ c.sx }}%;top:{{ c.sy }}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;border:3px solid {{ c.cardFg }}"></div>
+                  <div style="position:absolute;left:{{ c.hx }}%;top:{{ c.hy }}%;width:7%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:#8be9c3"></div>
+                </div>
+                <div style="font:400 18px/1.45 Manrope;opacity:.8;margin-top:18px">{{ c.blurb }}</div>
+                <div style="font:600 12px Manrope;letter-spacing:.16em;text-transform:uppercase;opacity:.6;margin-top:auto;padding-top:16px">You will need</div>
+                <div style="font:400 17px/1.45 Manrope;margin-top:4px">{{ c.needs }}</div>
+                <div style="margin-top:16px;display:flex;align-items:center;padding:16px 20px;border-radius:14px;font:700 22px Outfit;background:{{ c.btnBg }};color:{{ c.btnFg }}"><span>{{ c.btn }}</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.a.g }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S07 -->
+    <div id="s07" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s07" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S07</a>Step 3b · Place your objects<span style="color:#a3a8b4;font-weight:400">— template ghosts guide placement; ticks are a live hint only. “Scan obstacles” hands over to detection (<a href="#s07b">S07b</a>)</span></div>
+      <div data-screen-label="S07 Course editor" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="rgba(242,239,232,.8)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3">
+            <polygon points="{{ o.pts }}" fill="{{ o.ffill }}" stroke="{{ o.fstroke }}" stroke-width="4" stroke-linejoin="round"></polygon>
+          </sc-for>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="rgba(242,239,232,.1)" stroke="#f2efe8" stroke-width="3"></circle>
+          <text x="{{ feedStart.x }}" y="{{ feedStart.ly }}" text-anchor="middle" fill="#f2efe8" font-family="Outfit" font-weight="700" font-size="26">START</text>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.25)" stroke="#8be9c3" stroke-width="4"></circle>
+          <text x="{{ feedHole.x }}" y="{{ feedHole.ly }}" text-anchor="middle" fill="#8be9c3" font-family="Outfit" font-weight="700" font-size="26">Cup goes here</text>
+        </svg>
+        <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3"><div style="position:absolute;left:{{ o.xp }}%;top:{{ o.yp }}%;transform:translateY(-100%);font:700 26px/1.2 Outfit;color:#f2efe8;white-space:nowrap">{{ o.label }}</div></sc-for>
+        <div style="position:absolute;left:56px;top:40px;display:flex;align-items:center;gap:16px"><span style="font:700 22px Outfit">Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">Step 3 of 5 · {{ course.name }}</span></div>
+        <div style="position:absolute;left:56px;bottom:40px;display:flex;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.ls.r }};background:{{ H.ls.bg }};color:{{ H.ls.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.ls.g }}</span>Move</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.a.g }}</span>Grab / drop</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.x.g }}</span>Rotate 90°</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.y.g }}</span>Reset template</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.rb.r }};background:{{ H.rb.bg }};color:{{ H.rb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.rb.g }}</span>Next object</span>
+        </div>
+        <div style="position:absolute;right:40px;top:40px;bottom:40px;width:480px;background:rgba(21,23,28,.72);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:36px;display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">{{ course.level }} · Par {{ course.par }}</div>
+          <h2 style="font:800 48px/1 Outfit;letter-spacing:-.03em;margin:12px 0 16px">Build “{{ course.name }}”.</h2>
+          <p style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin:0 0 20px">Put each object roughly inside its ghost — the ticks are a hint. When everything is down, scan: the app measures what’s really on the floor and you confirm it.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ course.obs }}" as="o" hint-placeholder-count="3">
+              <div style="display:flex;gap:14px;align-items:center;padding:14px 16px;border-radius:14px;background:rgba(242,239,232,.05)">
+                <span style="width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:50%;background:{{ o.tickBg }};color:#0f1a15;border:2px solid {{ o.tickBd }};font:800 16px Outfit">{{ o.tick }}</span>
+                <div style="flex:1"><div style="font:700 19px Outfit">{{ o.label }}</div><div style="font:400 14px Manrope;color:#a3a8b4">{{ o.item }}</div></div>
+                <span style="font:600 14px Manrope;color:#a3a8b4">{{ o.size }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;display:grid;gap:10px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:20px 24px;border-radius:16px;font:700 26px Outfit"><span>Scan obstacles</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:16px 24px;border-radius:16px;font:700 20px Outfit"><span>Swap course</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.lb.r }};background:{{ H.lb.bg }};color:{{ H.lb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.lb.g }}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S07b DETECTED -->
+    <div id="s07b" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s07b" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S07b</a>Step 3c · Obstacles detected<span style="color:#a3a8b4;font-weight:400">— app proposes dashed footprints from the above-floor map; nothing is final until confirmed</span></div>
+      <div data-screen-label="S07b Obstacles detected" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="rgba(242,239,232,.8)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ detObs }}" as="o" hint-placeholder-count="3">
+            <polygon points="{{ o.pts }}" fill="rgba(139,233,195,.12)" stroke="#8be9c3" stroke-width="4" stroke-dasharray="16 10" stroke-linejoin="round"></polygon>
+          </sc-for>
+          <polygon points="{{ falseDet.pts }}" fill="rgba(255,107,87,.14)" stroke="#ff6b57" stroke-width="4" stroke-dasharray="16 10" stroke-linejoin="round"></polygon>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="none" stroke="rgba(242,239,232,.5)" stroke-width="3"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.2)" stroke="rgba(139,233,195,.6)" stroke-width="3"></circle>
+        </svg>
+        <div style="position:absolute;left:56px;top:40px;display:flex;align-items:center;gap:16px"><span style="font:700 22px Outfit">Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">Step 3 of 5 · Obstacles · {{ course.name }}</span></div>
+        <div style="position:absolute;left:56px;top:88px;display:inline-flex;align-items:center;gap:10px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:10px 16px;border-radius:999px;font:600 16px Manrope"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>Scanned 1.5 s of depth · dashed = proposed, not yet on the course</div>
+        <sc-for list="{{ detObs }}" as="o" hint-placeholder-count="3"><div style="position:absolute;left:{{ o.xp }}%;top:{{ o.yp }}%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:#8be9c3;color:#0f1a15;display:grid;place-items:center;font:800 22px Outfit">{{ o.n }}</div></sc-for>
+        <div style="position:absolute;left:{{ falseDet.xp }}%;top:{{ falseDet.yp }}%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:#ff6b57;color:#15171c;display:grid;place-items:center;font:800 22px Outfit">{{ detCount }}</div>
+        <div style="position:absolute;left:56px;bottom:40px;display:flex;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.ls.r }};background:{{ H.ls.bg }};color:{{ H.ls.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.ls.g }}</span>Move cursor</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.a.g }}</span>Select object</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.x.g }}</span>Delete</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.y.g }}</span>Draw one</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.lb.r }};background:{{ H.lb.bg }};color:{{ H.lb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.lb.g }}</span>Undo</span>
+        </div>
+        <div style="position:absolute;right:40px;top:40px;bottom:40px;width:520px;background:rgba(21,23,28,.72);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:36px;display:flex;flex-direction:column;box-sizing:border-box">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Step 3 of 5 · Obstacles</div>
+          <h2 style="font:800 48px/1 Outfit;letter-spacing:-.03em;margin:12px 0 14px">Found {{ detCount }} objects.</h2>
+          <p style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin:0 0 18px">Outlines are approximate on purpose — they only draw the map and keep hidden balls from counting as lost. Delete anything that isn’t an object, then confirm.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ detObs }}" as="o" hint-placeholder-count="3">
+              <div style="display:flex;gap:14px;align-items:center;padding:12px 14px;border-radius:14px;background:rgba(242,239,232,.05)">
+                <span style="width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:50%;background:#8be9c3;color:#0f1a15;font:800 15px Outfit">{{ o.n }}</span>
+                <div style="flex:1;min-width:0"><div style="font:700 19px/1.3 Outfit;white-space:nowrap;overflow:hidden">{{ o.label }}</div><div style="font:400 14px Manrope;color:#a3a8b4;white-space:nowrap;overflow:hidden">{{ o.item }} · {{ o.size }}</div></div>
+                <span style="font:700 13px Outfit;padding:4px 10px;border-radius:999px;background:{{ o.confBg }};color:#0f1a15;flex:none">{{ o.conf }}</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;gap:14px;align-items:center;padding:12px 14px;border-radius:14px;background:rgba(255,107,87,.1);border:1px solid rgba(255,107,87,.35)">
+              <span style="width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:50%;background:#ff6b57;color:#15171c;font:800 15px Outfit">{{ detCount }}</span>
+              <div style="flex:1;min-width:0"><div style="font:700 19px/1.3 Outfit">Something near the sofa</div><div style="font:400 14px Manrope;color:#d8d5cd">Low confidence — a shadow or a foot? Select and delete if so.</div></div>
+              <span style="font:700 13px Outfit;padding:4px 10px;border-radius:999px;background:#ff6b57;color:#15171c;flex:none">41%</span>
+            </div>
+          </div>
+          <div style="margin-top:auto;display:grid;gap:10px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:20px 24px;border-radius:16px;font:700 26px Outfit"><span>Confirm all</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="display:flex;align-items:center;gap:12px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:16px 20px;border-radius:16px;font:700 20px Outfit"><span>Re-detect</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.rb.r }};background:{{ H.rb.bg }};color:{{ H.rb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.rb.g }}</span></div>
+              <div style="display:flex;align-items:center;gap:12px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:16px 20px;border-radius:16px;font:700 20px Outfit"><span>Draw one</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.y.g }}</span></div>
+            </div>
+            <div style="font:400 14px/1.45 Manrope;color:#a3a8b4">Confirm is disabled while a low-confidence proposal is still on screen — confirm or delete it first. Re-detect keeps anything already confirmed or drawn.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S07c CORRECT -->
+    <div id="s07c" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s07c" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S07c</a>Step 3c · Correcting<span style="color:#a3a8b4;font-weight:400">— object 1 selected with drag handles, object 2 confirmed (solid), false detection deleted, a manual polygon mid-draw</span></div>
+      <div data-screen-label="S07c Obstacles correct" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="rgba(242,239,232,.8)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ detRows }}" as="o" hint-placeholder-count="3">
+            <polygon points="{{ o.pts }}" fill="rgba(242,239,232,.06)" stroke="{{ o.sBd }}" stroke-width="4" stroke-dasharray="16 10" stroke-linejoin="round"></polygon>
+          </sc-for>
+          <polygon points="{{ selObs.pts }}" fill="rgba(139,233,195,.16)" stroke="#8be9c3" stroke-width="5" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ selObs.handles }}" as="p" hint-placeholder-count="4"><circle cx="{{ p.x }}" cy="{{ p.y }}" r="{{ p.r }}" fill="{{ p.c }}" stroke="#15171c" stroke-width="3"></circle></sc-for>
+          <polygon points="{{ falseDet.pts }}" fill="none" stroke="rgba(255,107,87,.35)" stroke-width="3" stroke-dasharray="6 8"></polygon>
+          <text x="{{ falseDet.lx }}" y="{{ falseDet.ly }}" fill="rgba(255,107,87,.8)" font-family="Manrope" font-weight="600" font-size="22">deleted · LB to undo</text>
+          <polyline points="{{ drawLine }}" fill="none" stroke="#f2efe8" stroke-width="4" stroke-dasharray="12 10" stroke-linejoin="round"></polyline>
+          <sc-for list="{{ drawPts }}" as="p" hint-placeholder-count="3"><circle cx="{{ p.x }}" cy="{{ p.y }}" r="11" fill="#f2efe8" stroke="#15171c" stroke-width="3"></circle></sc-for>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="none" stroke="rgba(242,239,232,.5)" stroke-width="3"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.2)" stroke="rgba(139,233,195,.6)" stroke-width="3"></circle>
+        </svg>
+        <div style="position:absolute;left:{{ selObs.xp }}%;top:{{ selObs.yp }}%;transform:translateY(-100%);font:700 26px/1.2 Outfit;color:#8be9c3;white-space:nowrap">{{ selObs.label }} · drag a corner to resize</div>
+        <div style="position:absolute;left:56px;top:40px;display:flex;align-items:center;gap:16px"><span style="font:700 22px Outfit">Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">Step 3 of 5 · Obstacles · {{ course.name }}</span></div>
+        <div style="position:absolute;left:56px;top:88px;display:flex;gap:10px;font:600 15px Manrope">
+          <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px;border-radius:999px"><span style="width:26px;height:4px;border-radius:2px;background:#8be9c3"></span>Selected</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px;border-radius:999px"><span style="width:26px;height:4px;border-radius:2px;background:#f2efe8"></span>Confirmed</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px;border-radius:999px"><span style="width:26px;height:4px;border-radius:2px;background:repeating-linear-gradient(90deg,rgba(242,239,232,.5) 0 6px,transparent 6px 10px)"></span>Pending</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px;border-radius:999px"><span style="width:26px;height:4px;border-radius:2px;background:repeating-linear-gradient(90deg,rgba(255,107,87,.6) 0 4px,transparent 4px 8px)"></span>Deleted</span>
+        </div>
+        <div style="position:absolute;left:56px;bottom:40px;display:flex;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.ls.r }};background:{{ H.ls.bg }};color:{{ H.ls.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.ls.g }}</span>Drag corner</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.a.g }}</span>Confirm this one</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.x.g }}</span>Delete</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.rs.r }};background:{{ H.rs.bg }};color:{{ H.rs.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.rs.g }}</span>Add / remove corner</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:8px 14px 8px 8px;border-radius:999px"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.lb.r }};background:{{ H.lb.bg }};color:{{ H.lb.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.lb.g }}</span>Undo · 3</span>
+        </div>
+        <div style="position:absolute;right:40px;top:40px;bottom:40px;width:520px;background:rgba(21,23,28,.72);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:36px;display:flex;flex-direction:column;box-sizing:border-box">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Object 1 · {{ selObs.label }}</div>
+          <h2 style="font:800 48px/1 Outfit;letter-spacing:-.03em;margin:12px 0 14px">Fix the outline.</h2>
+          <p style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin:0 0 18px">Drag the corners until the outline roughly covers the object. Close enough is good enough. Click an edge to add a corner; press the stick to remove one.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ detRows }}" as="o" hint-placeholder-count="5">
+              <div style="display:flex;gap:14px;align-items:center;padding:10px 14px;border-radius:14px;background:rgba(242,239,232,.05)">
+                <span style="width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:50%;background:rgba(242,239,232,.1);color:#f2efe8;font:800 14px Outfit">{{ o.n }}</span>
+                <div style="flex:1;min-width:0"><div style="font:700 18px/1.3 Outfit;white-space:nowrap;overflow:hidden">{{ o.label }}</div><div style="font:400 13px Manrope;color:#a3a8b4;white-space:nowrap;overflow:hidden">{{ o.item }}</div></div>
+                <span style="font:700 13px Outfit;padding:4px 10px;border-radius:999px;background:{{ o.sBg }};color:{{ o.sFg }};border:1px solid {{ o.sBd }};flex:none">{{ o.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;display:grid;gap:10px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:20px 24px;border-radius:16px;font:700 26px Outfit"><span>Confirm this outline</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:flex;align-items:center;gap:12px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:16px 20px;border-radius:16px;font:700 20px Outfit;opacity:.55"><span>Course is set</span><span style="margin-left:auto;font:400 14px Manrope;color:#a3a8b4">2 pending · 1 drawing</span></div>
+            <div style="font:400 14px/1.45 Manrope;color:#a3a8b4">“Course is set” unlocks only when every outline is confirmed or deleted. Undo steps back through every edit in this step, including re-detects.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S08 -->
+    <div id="s08" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s08" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S08</a>Step 4 · Cup detection</div>
+      <div data-screen-label="S08 Cup" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="rgba(242,239,232,.5)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <polygon points="1360,380 1520,380 1540,470 1340,470" fill="#3f6e4c"></polygon>
+          <ellipse cx="1440" cy="425" rx="46" ry="26" fill="#f2efe8"></ellipse><ellipse cx="1440" cy="425" rx="28" ry="15" fill="#3f6e4c"></ellipse>
+          <circle cx="1440" cy="425" r="60" fill="none" stroke="#8be9c3" stroke-width="5"></circle><circle cx="1500" cy="425" r="10" fill="#f2efe8"></circle>
+          <text x="1440" y="530" text-anchor="middle" fill="#8be9c3" font-family="Outfit" font-weight="700" font-size="28">Hole zone · Ø 9 cm · confidence 0.94</text>
+        </svg>
+        <div style="position:absolute;left:56px;top:48px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:32px 40px;max-width:900px"><div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Step 4 of 5 · Cup</div><div style="font:800 60px/1 Outfit;letter-spacing:-.03em;margin-top:10px">Found the cup.</div><div style="font:400 21px/1.45 Manrope;color:#a3a8b4;margin-top:14px">Averaged 1.5 s of depth and matched the white ring. Is the mint circle on the opening? Drag the circle, or the dot to resize.</div></div>
+        <div style="position:absolute;left:56px;right:56px;bottom:48px;display:flex;gap:14px">
+          <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:400px"><span>That’s the hole</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+          <div style="display:flex;align-items:center;gap:16px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:400px"><span>Detect again</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.x.g }}</span></div>
+          <div style="display:flex;align-items:center;gap:16px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:400px"><span>Draw it myself</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.y.g }}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S09 -->
+    <div id="s09" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s09" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S09</a>Step 5 · Balls &amp; players<span style="color:#a3a8b4;font-weight:400">— a green ball is refused</span></div>
+      <div data-screen-label="S09 Balls" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.05)" stroke="rgba(242,239,232,.5)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ ballsOnFloor }}" as="b" hint-placeholder-count="4">
+            <circle cx="{{ b.x }}" cy="{{ b.y }}" r="22" fill="{{ b.c }}" stroke="#f2efe8" stroke-width="3"></circle>
+          </sc-for>
+          <circle cx="880" cy="720" r="22" fill="#4caf50" stroke="#ff6b57" stroke-width="5"></circle>
+          <rect x="912" y="690" width="470" height="44" rx="22" fill="#ff6b57"></rect>
+          <text x="934" y="722" fill="#15171c" font-family="Outfit" font-weight="700" font-size="24">Too close to the cup color — swap it</text>
+        </svg>
+          <sc-for list="{{ ballsOnFloor }}" as="b" hint-placeholder-count="4"><div style="position:absolute;left:{{ b.xp }}%;top:{{ b.yp }}%;transform:translateY(-50%);height:44px;padding:0 18px;border-radius:22px;background:{{ b.c }};color:#15171c;display:flex;align-items:center;font:700 24px Outfit;white-space:nowrap">{{ b.tag }}</div></sc-for>
+        <div style="position:absolute;left:56px;top:48px;font:800 48px/1 Outfit;letter-spacing:-.03em">Put every ball on the floor.</div>
+        <div style="position:absolute;right:40px;top:40px;bottom:40px;width:640px;background:rgba(21,23,28,.72);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:36px;display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">4 balls found · 1 rejected</div>
+          <h2 style="font:800 48px/1 Outfit;letter-spacing:-.03em;margin:12px 0 16px">Who’s who?</h2>
+          <p style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin:0 0 20px">Type a name next to each ball. Order here is tee-off order; drag rows to reorder. Tap a swatch to re-sample if lighting changed.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ players }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;gap:14px;align-items:center;padding:10px 12px 10px 16px;border-radius:16px;background:rgba(242,239,232,.05)">
+                <span style="font:700 16px Outfit;color:#a3a8b4;width:20px">{{ p.order }}</span>
+                <span style="width:48px;height:48px;flex:none;border-radius:50%;background:{{ p.c }}"></span>
+                <div style="flex:1;background:#15171c;border:1px solid rgba(242,239,232,.15);border-radius:12px;padding:12px 16px;font:700 22px Outfit;display:flex;justify-content:space-between;align-items:center"><span>{{ p.name }}</span><span style="font:400 14px Manrope;color:#a3a8b4">{{ p.hue }}</span></div>
+                <span style="font:600 18px Manrope;color:#a3a8b4">⋮⋮</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;gap:14px;align-items:center;padding:10px 16px;border-radius:16px;border:1px dashed rgba(242,239,232,.2);color:#a3a8b4"><span style="font:700 16px Outfit;width:20px">5</span><span style="width:48px;height:48px;flex:none;border-radius:50%;border:2px dashed rgba(242,239,232,.25)"></span><div style="font:400 16px Manrope">Room for two more balls — max 6 players.</div></div>
+          </div>
+          <div style="margin-top:auto;display:grid;gap:10px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:20px 24px;border-radius:16px;font:700 26px Outfit"><span>Save setup &amp; continue</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="font:400 14px/1.45 Manrope;color:#a3a8b4">Writes rumpus-setup.json: floor plane, play area, course template + nudges, hole zone, ball hue ranges, names.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- C · PLAY -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">C</span><span style="font:700 18px Outfit">Play</span><span style="font:400 13px Manrope;color:#a3a8b4">Tee-off · HUD · turn change · hole-out · out of bounds · lost ball</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S10 -->
+    <div id="s10" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s10" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S10</a>Game start</div>
+      <div data-screen-label="S10 Game start" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-columns:1fr 760px;gap:32px;padding:56px;box-sizing:border-box">
+        <img alt="Putt rolling toward the hole — Waldemar Brandt, Unsplash" src="https://images.unsplash.com/photo-1561840883-dbdb5300f464?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.3;filter:saturate(.7)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.95) 35%,rgba(21,23,28,.6) 100%)"></div>
+        <div style="position:relative;display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Setup saved · Living room</div>
+          <h2 style="font:800 112px/1 Outfit;letter-spacing:-.045em;margin:16px 0 44px">Game<br>night.</h2>
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;margin-bottom:10px">Holes this game</div>
+          <div style="display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:16px;max-width:760px">
+            <sc-for list="{{ holeOpts }}" as="h" hint-placeholder-count="9"><div style="flex:1;text-align:center;padding:14px 0;border-radius:12px;font:700 26px Outfit;background:{{ h.bg }};color:{{ h.fg }}">{{ h.n }}</div></sc-for>
+          </div>
+          <div style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin:12px 0 32px">Hole 1 → Beginner, 2 → Advanced, 3 → Expert, then repeat. Swap any hole’s course from Pause.</div>
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;margin-bottom:10px">Stroke cap</div>
+          <div style="display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:16px;width:max-content;align-items:center"><span style="width:56px;height:56px;display:grid;place-items:center;border-radius:12px;font:700 26px Outfit;background:rgba(242,239,232,.08)">−</span><span style="padding:0 28px;font:700 26px Outfit">{{ strokeCap }} strokes</span><span style="width:56px;height:56px;display:grid;place-items:center;border-radius:12px;font:700 26px Outfit;background:rgba(242,239,232,.08)">+</span></div>
+          <div style="margin-top:auto;display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:26px 32px;border-radius:20px;font:700 34px Outfit;max-width:760px"><span>Tee off</span><span style="margin-left:auto;min-width:36px;height:36px;padding:0 10px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 17px Outfit">{{ H.a.g }}</span></div>
+        </div>
+        <div style="position:relative;display:flex;flex-direction:column;gap:12px">
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;padding:8px 0 4px">Tee-off order · {{ playerCount }} players</div>
+          <sc-for list="{{ players }}" as="p" hint-placeholder-count="4">
+            <div style="flex:1;display:flex;align-items:center;gap:28px;padding:0 40px;border-radius:24px;background:{{ p.c }};color:#15171c">
+              <span style="font:800 64px Outfit;opacity:.45">{{ p.order }}</span>
+              <span style="font:800 60px/1.2 Outfit;letter-spacing:-.03em;white-space:nowrap;overflow:hidden;min-width:0;flex:1">{{ p.name }}</span>
+              <span style="margin-left:auto;font:600 18px Manrope;text-transform:uppercase;letter-spacing:.12em;opacity:.7">{{ p.hue }} ball</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- S11 HUD -->
+    <div id="s11" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s11" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S11</a>Game HUD<span style="color:#a3a8b4;font-weight:400">— active player owns a glass card in their color; others are chips</span></div>
+      <div data-screen-label="S11 HUD" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.04)" stroke="rgba(242,239,232,.7)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3"><polygon points="{{ o.pts }}" fill="rgba(242,239,232,.08)" stroke="rgba(242,239,232,.55)" stroke-width="3" stroke-linejoin="round"></polygon></sc-for>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="none" stroke="rgba(242,239,232,.55)" stroke-width="3"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.22)" stroke="#8be9c3" stroke-width="4"></circle>
+          <sc-for list="{{ trail }}" as="t" hint-placeholder-count="6"><circle cx="{{ t.x }}" cy="{{ t.y }}" r="{{ t.r }}" fill="{{ t.c }}" opacity="{{ t.o }}"></circle></sc-for>
+          <sc-for list="{{ ballsInPlay }}" as="b" hint-placeholder-count="4">
+            <circle cx="{{ b.x }}" cy="{{ b.y }}" r="20" fill="{{ b.c }}" stroke="#f2efe8" stroke-width="3"></circle>
+          </sc-for>
+        </svg>
+        <sc-for list="{{ ballsInPlay }}" as="b" hint-placeholder-count="4"><div style="position:absolute;left:{{ b.xp }}%;top:{{ b.yp }}%;transform:translate(-50%,-100%);font:700 24px/1.2 Outfit;color:{{ b.c }};white-space:nowrap">{{ b.name }}</div></sc-for>
+        <div style="position:absolute;left:40px;right:40px;top:40px;display:flex;gap:16px;align-items:stretch">
+          <div style="background:{{ active.c }};color:#15171c;padding:26px 40px;border-radius:24px;display:flex;align-items:center;gap:40px;box-shadow:0 20px 50px rgba(0,0,0,.35)">
+            <div><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Your turn</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.035em;margin-top:2px;white-space:nowrap">{{ active.name }}</div></div>
+            <div style="border-left:2px solid rgba(21,23,28,.25);padding-left:36px"><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Stroke</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.03em;margin-top:2px">{{ active.stroke }}</div></div>
+            <div style="border-left:2px solid rgba(21,23,28,.25);padding-left:36px;font:600 26px/1.25 Manrope;max-width:420px;opacity:.85">{{ active.status }}</div>
+          </div>
+          <div style="display:flex;gap:10px;margin-left:auto">
+            <sc-for list="{{ others }}" as="p" hint-placeholder-count="3">
+              <div style="padding:20px 24px;border-radius:20px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);display:flex;flex-direction:column;justify-content:center;gap:6px;min-width:190px">
+                <div style="display:flex;align-items:center;gap:10px"><span style="width:16px;height:16px;border-radius:50%;background:{{ p.c }}"></span><span style="font:700 24px/1.25 Outfit;white-space:nowrap;overflow:hidden;max-width:150px">{{ p.name }}</span></div>
+                <div style="font:400 18px Manrope;color:#a3a8b4">{{ p.holeLine }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:40px;bottom:40px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);border-radius:20px;padding:18px 24px">
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4">Hole {{ holeNo }} of {{ holeCount }} · {{ course.level }} · Par {{ course.par }}</div>
+          <div style="font:800 34px/1 Outfit;letter-spacing:-.02em;margin-top:6px">{{ course.name }}</div>
+        </div>
+        <div style="position:absolute;right:40px;bottom:40px;display:flex;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:10px 16px 10px 10px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.x.g }}</span>Undo last shot</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:10px 16px 10px 10px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.menu.r }};background:{{ H.menu.bg }};color:{{ H.menu.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.menu.g }}</span>Pause</span>
+        </div>
+        <div style="position:absolute;right:40px;top:230px;display:flex;align-items:center;gap:12px;font:700 20px Outfit;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:12px 18px;border-radius:999px"><span style="width:12px;height:12px;border-radius:50%;background:{{ active.c }}"></span>Ball {{ active.motion }}</div>
+      </div>
+    </div>
+
+    <!-- S11b HIDDEN BALL + NEW OBJECT -->
+    <div id="s11b" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s11b" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S11b</a>HUD · ball hidden behind an obstacle + new object prompt<span style="color:#a3a8b4;font-weight:400">— “stopped, hidden” is not “lost”; the prompt only appears while no ball is moving</span></div>
+      <div data-screen-label="S11b HUD hidden ball" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.04)" stroke="rgba(242,239,232,.7)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <sc-for list="{{ feedObs }}" as="o" hint-placeholder-count="3"><polygon points="{{ o.pts }}" fill="rgba(242,239,232,.08)" stroke="rgba(242,239,232,.55)" stroke-width="3" stroke-linejoin="round"></polygon></sc-for>
+          <circle cx="{{ feedStart.x }}" cy="{{ feedStart.y }}" r="70" fill="none" stroke="rgba(242,239,232,.55)" stroke-width="3"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.22)" stroke="#8be9c3" stroke-width="4"></circle>
+          <circle cx="{{ hiddenBall.x }}" cy="{{ hiddenBall.y }}" r="22" fill="rgba(91,140,255,.25)" stroke="{{ hiddenBall.c }}" stroke-width="4" stroke-dasharray="8 6"></circle>
+          <text x="{{ hiddenBall.x }}" y="{{ hiddenBall.y }}" dy="9" text-anchor="middle" fill="{{ hiddenBall.c }}" font-family="Outfit" font-weight="800" font-size="24">?</text>
+          <polygon points="{{ falseDet.pts }}" fill="rgba(242,239,232,.08)" stroke="rgba(242,239,232,.7)" stroke-width="3" stroke-dasharray="14 10" stroke-linejoin="round"></polygon>
+          <text x="{{ falseDet.lx }}" y="{{ falseDet.ly }}" fill="#f2efe8" font-family="Outfit" font-weight="700" font-size="24">New object?</text>
+        </svg>
+        <div style="position:absolute;left:{{ hiddenBall.xp }}%;top:{{ hiddenBall.yp }}%;transform:translate(-50%,0);font:700 24px/1.2 Outfit;color:{{ hiddenBall.c }};white-space:nowrap;background:rgba(21,23,28,.7);padding:4px 12px;border-radius:999px">Sam · hidden behind {{ boxLabel }}</div>
+        <div style="position:absolute;left:40px;right:40px;top:40px;display:flex;gap:16px;align-items:stretch">
+          <div style="background:{{ active.c }};color:#15171c;padding:26px 40px;border-radius:24px;display:flex;align-items:center;gap:40px;box-shadow:0 20px 50px rgba(0,0,0,.35)">
+            <div><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Your turn</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.035em;margin-top:2px;white-space:nowrap">{{ active.name }}</div></div>
+            <div style="border-left:2px solid rgba(21,23,28,.25);padding-left:36px"><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Stroke</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.03em;margin-top:2px">{{ active.stroke }}</div></div>
+            <div style="border-left:2px solid rgba(21,23,28,.25);padding-left:36px;font:600 26px/1.25 Manrope;max-width:420px;opacity:.85">Ball stopped. Putt when ready.</div>
+          </div>
+          <div style="display:flex;gap:10px;margin-left:auto">
+            <sc-for list="{{ others }}" as="p" hint-placeholder-count="3">
+              <div style="padding:20px 24px;border-radius:20px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);display:flex;flex-direction:column;justify-content:center;gap:6px;min-width:190px">
+                <div style="display:flex;align-items:center;gap:10px"><span style="width:16px;height:16px;border-radius:50%;background:{{ p.c }}"></span><span style="font:700 24px/1.25 Outfit;white-space:nowrap;overflow:hidden;max-width:150px">{{ p.name }}</span></div>
+                <div style="font:400 18px Manrope;color:#a3a8b4">{{ p.hiddenLine }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="position:absolute;left:40px;bottom:40px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);border-radius:20px;padding:18px 24px">
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4">Hole {{ holeNo }} of {{ holeCount }} · {{ course.level }} · Par {{ course.par }}</div>
+          <div style="font:800 34px/1 Outfit;letter-spacing:-.02em;margin-top:6px">{{ course.name }}</div>
+        </div>
+        <div style="position:absolute;left:50%;bottom:40px;transform:translateX(-50%);background:rgba(21,23,28,.8);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.14);border-radius:20px;padding:18px 20px 18px 24px;display:flex;align-items:center;gap:20px;box-shadow:0 20px 50px rgba(0,0,0,.35)">
+          <div style="min-width:0"><div style="font:700 22px Outfit">New object on the course</div><div style="font:400 16px Manrope;color:#a3a8b4">Still for 3 s near the sofa. Add it so balls behind it aren’t “lost”?</div></div>
+          <div style="display:flex;align-items:center;gap:10px;background:#8be9c3;color:#0f1a15;padding:12px 16px 12px 18px;border-radius:12px;font:700 18px Outfit"><span>Add as obstacle</span><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.a.g }}</span></div>
+          <div style="display:flex;align-items:center;gap:10px;background:rgba(242,239,232,.08);padding:12px 16px 12px 18px;border-radius:12px;font:700 18px Outfit"><span>Ignore</span><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.b.g }}</span></div>
+        </div>
+        <div style="position:absolute;right:40px;bottom:40px;display:flex;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:10px 16px 10px 10px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.x.g }}</span>Undo last shot</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:10px 16px 10px 10px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.menu.r }};background:{{ H.menu.bg }};color:{{ H.menu.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.menu.g }}</span>Pause</span>
+        </div>
+        <div style="position:absolute;right:40px;top:230px;display:flex;align-items:center;gap:12px;font:700 20px Outfit;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:12px 18px;border-radius:999px"><span style="width:12px;height:12px;border-radius:50%;background:#5b8cff"></span>Sam’s ball · stopped, hidden · position estimated</div>
+      </div>
+    </div>
+
+    <!-- S12 TURN CHANGE -->
+    <div id="s12" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s12" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S12</a>Turn change (1.4 s)<span style="color:#a3a8b4;font-weight:400">— color wipe + two-note sting; feed dims underneath</span></div>
+      <div data-screen-label="S12 Turn change" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126);opacity:.4"></div>
+        <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:{{ next.c }};border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4)"></div>
+        <div style="position:absolute;left:96px;bottom:96px;color:#15171c">
+          <div style="font:600 24px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.65">Next up</div>
+          <div style="font:800 230px/1.15 Outfit;letter-spacing:-.05em;margin-top:12px;white-space:nowrap">{{ next.name }}</div>
+          <div style="font:600 32px/1.3 Manrope;margin-top:28px;opacity:.8;white-space:nowrap;overflow:hidden">Play the {{ next.hue }} ball where it lies · stroke {{ next.nextStroke }}</div>
+        </div>
+        <div style="position:absolute;right:96px;top:96px;text-align:right"><div style="font:600 20px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#a3a8b4">{{ active.name }} stopped</div><div style="font:800 56px/1.1 Outfit;letter-spacing:-.03em;margin-top:14px;display:flex;align-items:center;gap:16px;justify-content:flex-end"><span style="width:24px;height:24px;border-radius:50%;background:{{ active.c }}"></span>Stroke {{ active.stroke }} · in play</div></div>
+      </div>
+    </div>
+
+    <!-- S13 HOLE OUT -->
+    <div id="s13" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s13" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S13</a>Hole-out celebration<span style="color:#a3a8b4;font-weight:400">— hole zone flashes, rings pulse in the player color, cheer SFX</span></div>
+      <div data-screen-label="S13 Hole out" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(242,239,232,.04)" stroke="rgba(242,239,232,.5)" stroke-width="3" stroke-linejoin="round"></polygon>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="42" fill="rgba(139,233,195,.4)" stroke="#8be9c3" stroke-width="6" style="animation:rg-flash .5s ease-in-out infinite"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="120" fill="none" stroke="{{ active.c }}" stroke-width="6" style="transform-box:fill-box;transform-origin:center;animation:rg-pulse 1.2s ease-out infinite"></circle>
+          <circle cx="{{ feedHole.x }}" cy="{{ feedHole.y }}" r="18" fill="{{ active.c }}" stroke="#f2efe8" stroke-width="3"></circle>
+        </svg>
+        <div style="position:absolute;left:40px;right:40px;top:40px;background:{{ active.c }};color:#15171c;border-radius:28px;padding:48px 64px;display:flex;align-items:flex-end;gap:56px;box-shadow:0 30px 80px rgba(0,0,0,.4)">
+          <div style="font:800 200px/1 Outfit;letter-spacing:-.05em">In!</div>
+          <div style="padding-bottom:20px"><div style="font:800 64px/1.05 Outfit;letter-spacing:-.03em;margin-top:8px">{{ active.name }} holed in {{ active.stroke }}.</div><div style="font:600 30px Manrope;margin-top:14px;opacity:.7">{{ active.parLine }} · Par {{ course.par }}</div></div>
+        </div>
+        <div style="position:absolute;left:40px;bottom:40px;display:inline-flex;align-items:center;gap:10px;font:600 18px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:12px 18px 12px 12px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.x.g }}</span>Wrong call? Undo within 5 s — the ball goes back in play at the cup.</div>
+      </div>
+    </div>
+
+    <!-- S14 OOB -->
+    <div id="s14" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s14" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S14</a>Out of bounds + lost ball</div>
+      <div data-screen-label="S14 OOB" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <svg viewBox="0 0 1920 1080" style="position:absolute;inset:0;width:100%;height:100%">
+          <polygon points="420,300 1500,300 1760,980 160,980" fill="rgba(255,107,87,.06)" stroke="#ff6b57" stroke-width="5" stroke-linejoin="round"></polygon>
+          <line x1="900" y1="760" x2="1640" y2="700" stroke="{{ active.c }}" stroke-width="4" stroke-linecap="round"></line>
+          <circle cx="1660" cy="698" r="20" fill="{{ active.c }}" stroke="#f2efe8" stroke-width="3"></circle>
+          <circle cx="1618" cy="698" r="34" fill="none" stroke="#ff6b57" stroke-width="6"></circle>
+          <text x="1580" y="800" text-anchor="end" fill="#ff6b57" font-family="Outfit" font-weight="700" font-size="30">Exit point — put the ball back here</text>
+        </svg>
+        <div style="position:absolute;left:40px;right:40px;top:40px;display:flex;gap:16px">
+          <div style="background:{{ active.c }};color:#15171c;padding:26px 40px;border-radius:24px;display:flex;align-items:center;gap:40px">
+            <div><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Your turn</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.035em;margin-top:2px;white-space:nowrap">{{ active.name }}</div></div>
+            <div style="border-left:2px solid rgba(21,23,28,.25);padding-left:36px"><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Stroke</div><div style="font:800 76px/1.15 Outfit;letter-spacing:-.03em;margin-top:2px">{{ active.strokePlus }}</div></div>
+          </div>
+          <div style="background:#ff6b57;color:#15171c;padding:26px 40px;border-radius:24px;display:flex;flex-direction:column;justify-content:center"><div style="font:600 15px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.7">Out of bounds</div><div style="font:800 52px/1 Outfit;letter-spacing:-.03em;margin-top:6px">+1 penalty</div></div>
+        </div>
+        <div style="position:absolute;left:40px;right:40px;bottom:40px;background:rgba(21,23,28,.75);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:22px 28px;display:flex;align-items:center;gap:24px">
+          <span style="width:20px;height:20px;border-radius:50%;background:#5b8cff;flex:none"></span>
+          <div style="font:700 28px Outfit">Lost Sam’s ball.</div><div style="font:400 21px Manrope;color:#a3a8b4">Not seen for 2.4 s — under the sofa? Play continues; it resumes when a blue ball reappears.</div>
+          <span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;font:600 16px Manrope;color:#f2efe8;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:10px 16px 10px 10px;border-radius:999px"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.y.r }};background:{{ H.y.bg }};color:{{ H.y.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.y.g }}</span>Re-assign balls</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- D · PAUSE -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">D</span><span style="font:700 18px Outfit">Pause &amp; corrections</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S15 -->
+    <div id="s15" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s15" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S15</a>Pause menu<span style="color:#a3a8b4;font-weight:400">— music ducks, feed dims, recalibrate is granular</span></div>
+      <div data-screen-label="S15 Pause" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <img alt="Living room with a fireplace — Clay Banks, Unsplash" src="https://images.unsplash.com/photo-1698933787134-af2d451985c7?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.75) brightness(.7)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.55) 0%,rgba(21,23,28,.2) 45%,rgba(21,23,28,.75) 100%)"></div>
+        <div style="position:absolute;left:40px;top:40px;bottom:40px;width:680px;box-sizing:border-box;background:rgba(21,23,28,.8);backdrop-filter:blur(30px);border:1px solid rgba(242,239,232,.12);border-radius:28px;padding:48px;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:10px;font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#a3a8b4"><span style="width:12px;height:12px;border-radius:50%;background:{{ active.c }}"></span>Hole {{ holeNo }} · {{ active.name }} to play</div>
+          <h2 style="font:800 88px/1 Outfit;letter-spacing:-.04em;margin:14px 0 32px">Paused.</h2>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ pauseItems }}" as="m" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:16px;padding:18px 22px;border-radius:16px;font:700 26px Outfit;background:{{ m.bg }};color:{{ m.fg }}"><span>{{ m.t }}</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ m.h.r }};background:{{ m.h.bg }};color:{{ m.h.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ m.h.g }}</span></div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;font:400 15px/1.45 Manrope;color:#a3a8b4">Recalibrate opens the setup screens (S04–S09) with current values pre-filled; Back returns here with the game intact.</div>
+        </div>
+        <div style="position:absolute;right:40px;top:40px;width:520px;background:rgba(21,23,28,.7);backdrop-filter:blur(24px);border:1px solid rgba(242,239,232,.12);border-radius:24px;padding:28px 32px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:baseline;gap:12px"><div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4">Hole {{ holeNo }} of {{ holeCount }} · Par {{ course.par }}</div><div style="margin-left:auto;font:700 20px Outfit">{{ course.name }}</div></div>
+          <sc-for list="{{ players }}" as="p" hint-placeholder-count="4"><div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-top:1px solid rgba(242,239,232,.08)"><span style="width:16px;height:16px;border-radius:50%;background:{{ p.c }};flex:none"></span><span style="font:700 22px/1.25 Outfit;white-space:nowrap;overflow:hidden;min-width:0;flex:1">{{ p.name }}</span><span style="font:400 17px Manrope;color:#a3a8b4">{{ p.state }}</span><span style="font:800 26px Outfit;width:40px;text-align:right">{{ p.cur }}</span></div></sc-for>
+        </div>
+        <div style="position:absolute;right:40px;bottom:40px;display:flex;gap:14px;align-items:center;font:600 18px Manrope;color:#f2efe8;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:14px 20px;border-radius:999px"><span style="width:12px;height:12px;border-radius:50%;background:#8be9c3"></span>Lobby Time — Kevin MacLeod · ducked to 30%</div>
+      </div>
+    </div>
+
+    <!-- S15 -->
+    <div id="s15b" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s15b" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S15b</a>Pause · “Recalibrate…” focused<span style="color:#a3a8b4;font-weight:400">— the sub-options fly out only while this row has focus; A or → opens them, B closes</span></div>
+      <div data-screen-label="S15b Pause recalibrate" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.04) 0 2px,transparent 2px 150px),linear-gradient(180deg,#34373d,#1f2126)"></div>
+        <img alt="Living room with a fireplace — Clay Banks, Unsplash" src="https://images.unsplash.com/photo-1698933787134-af2d451985c7?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.75) brightness(.7)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.55) 0%,rgba(21,23,28,.2) 45%,rgba(21,23,28,.75) 100%)"></div>
+        <div style="position:absolute;left:40px;top:40px;bottom:40px;width:680px;box-sizing:border-box;background:rgba(21,23,28,.8);backdrop-filter:blur(30px);border:1px solid rgba(242,239,232,.12);border-radius:28px;padding:48px;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:10px;font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#a3a8b4"><span style="width:12px;height:12px;border-radius:50%;background:{{ active.c }}"></span>Hole {{ holeNo }} · {{ active.name }} to play</div>
+          <h2 style="font:800 88px/1 Outfit;letter-spacing:-.04em;margin:14px 0 32px">Paused.</h2>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ pauseItemsRecal }}" as="m" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:16px;padding:18px 22px;border-radius:16px;font:700 26px Outfit;background:{{ m.bg }};color:{{ m.fg }}"><span>{{ m.t }}</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ m.h.r }};background:{{ m.h.bg }};color:{{ m.h.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ m.h.g }}</span></div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;font:400 15px/1.45 Manrope;color:#a3a8b4">Recalibrate opens the setup screens (S04–S09) with current values pre-filled; Back returns here with the game intact.</div>
+        </div>
+        <div style="position:absolute;left:744px;width:900px;top:40px;bottom:40px;padding:48px 24px;display:flex;flex-direction:column;gap:20px;box-sizing:border-box">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3;margin-top:236px">Recalibrate — pick only what moved</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <sc-for list="{{ recal }}" as="r" hint-placeholder-count="6"><div style="background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);border-radius:20px;padding:24px 28px"><div style="font:700 26px Outfit">{{ r.t }}</div><div style="font:400 17px/1.45 Manrope;color:#a3a8b4;margin-top:6px">{{ r.d }}</div></div></sc-for>
+          </div>
+          <div style="margin-top:auto;display:flex;gap:14px;align-items:center;font:600 18px Manrope;color:#a3a8b4"><span style="width:12px;height:12px;border-radius:50%;background:#8be9c3"></span>Lobby Time — Kevin MacLeod · ducked to 30% while paused</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S16 -->
+    <div id="s16" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s16" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S16</a>Undo &amp; fix score<span style="color:#a3a8b4;font-weight:400">— event log is the undo stack</span></div>
+      <div data-screen-label="S16 Fix score" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-columns:1fr 700px;gap:32px;padding:56px;box-sizing:border-box">
+        <div style="display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Fix score · Hole {{ holeNo }}</div>
+          <h2 style="font:800 68px/1 Outfit;letter-spacing:-.035em;margin:14px 0 32px">Strokes this hole</h2>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ players }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:24px;padding:18px 24px;border-radius:20px;background:#1e2128">
+                <span style="width:44px;height:44px;border-radius:50%;background:{{ p.c }};flex:none"></span>
+                <span style="font:700 36px/1.25 Outfit;width:240px;white-space:nowrap;overflow:hidden">{{ p.name }}</span>
+                <span style="font:400 20px Manrope;color:#a3a8b4;width:180px">{{ p.state }}</span>
+                <div style="margin-left:auto;display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:16px;align-items:center"><span style="width:56px;height:56px;display:grid;place-items:center;border-radius:12px;font:700 28px Outfit;background:rgba(242,239,232,.08)">−</span><span style="min-width:100px;text-align:center;font:800 40px Outfit">{{ p.cur }}</span><span style="width:56px;height:56px;display:grid;place-items:center;border-radius:12px;font:700 28px Outfit;background:rgba(242,239,232,.08)">+</span></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;display:flex;gap:14px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:340px"><span>Apply</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:flex;align-items:center;gap:16px;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:340px"><span>Cancel</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.b.g }}</span></div>
+          </div>
+        </div>
+        <div style="background:#1e2128;border-radius:24px;padding:40px;display:flex;flex-direction:column">
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4">Event log · newest first</div>
+          <div style="margin:14px 0 18px;background:#f2efe8;color:#15171c;border-radius:18px;padding:20px 24px;display:flex;align-items:center;gap:16px"><div><div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;opacity:.6">Undo last shot</div><div style="font:700 24px Outfit;margin-top:4px">{{ undo.line }}</div></div><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.x.r }};background:{{ H.x.bg }};color:{{ H.x.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.x.g }}</span></div>
+          <div style="display:flex;flex-direction:column">
+            <sc-for list="{{ events }}" as="e" hint-placeholder-count="6"><div style="display:flex;gap:14px;align-items:center;padding:14px 0;border-bottom:1px solid rgba(242,239,232,.08);font:400 18px Manrope"><span style="font:600 14px Manrope;color:#a3a8b4;width:52px">{{ e.t }}</span><span style="width:12px;height:12px;border-radius:50%;background:{{ e.c }};flex:none"></span><span>{{ e.txt }}</span></div></sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- E · FINISH -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">E</span><span style="font:700 18px Outfit">Between holes &amp; finish</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S17 -->
+    <div id="s17" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s17" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S17</a>Hole complete</div>
+      <div data-screen-label="S17 Hole complete" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-columns:1fr 560px;gap:32px;padding:56px;box-sizing:border-box">
+        <div style="display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Hole {{ holeNo }} of {{ holeCount }} done</div>
+          <h2 style="font:800 80px/1 Outfit;letter-spacing:-.04em;margin:14px 0 32px">Scorecard</h2>
+          <div style="background:#1e2128;border-radius:24px;padding:12px 32px;display:grid;grid-template-columns:auto repeat({{ holeCount }},1fr) 1fr;font:400 28px Manrope">
+            <div style="padding:16px 0;font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.1)">Player</div>
+            <sc-for list="{{ holeHeads }}" as="h" hint-placeholder-count="3"><div style="padding:16px 0;font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.1);text-align:center">{{ h }}</div></sc-for>
+            <div style="padding:16px 0;font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#8be9c3;border-bottom:1px solid rgba(242,239,232,.1);text-align:center">Total</div>
+            <sc-for list="{{ card }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:16px;padding:22px 32px 22px 0;border-bottom:1px solid rgba(242,239,232,.08)"><span style="width:26px;height:26px;border-radius:50%;background:{{ r.c }}"></span><span style="font:700 30px/1.25 Outfit;white-space:nowrap;overflow:hidden;max-width:260px">{{ r.name }}</span></div>
+              <sc-for list="{{ r.cells }}" as="s" hint-placeholder-count="3"><div style="padding:22px 0;text-align:center;border-bottom:1px solid rgba(242,239,232,.08);color:{{ s.col }};font-weight:{{ s.w }}">{{ s.v }}</div></sc-for>
+              <div style="padding:22px 0;text-align:center;border-bottom:1px solid rgba(242,239,232,.08);font:800 30px Outfit">{{ r.total }}</div>
+            </sc-for>
+          </div>
+          <div style="font:400 16px Manrope;color:#a3a8b4;margin-top:12px">Coral = over par · bold = best on the hole · ○ not yet played</div>
+          <div style="margin-top:auto;display:flex;gap:14px">
+            <div style="display:flex;align-items:center;gap:16px;background:#8be9c3;color:#0f1a15;padding:22px 30px;border-radius:18px;font:700 28px Outfit;min-width:440px"><span>Build hole {{ nextHoleNo }}</span><span style="margin-left:auto;min-width:32px;height:32px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 15px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:flex;align-items:center;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit">Replay this hole</div>
+            <div style="display:flex;align-items:center;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:22px 30px;border-radius:18px;font:700 28px Outfit">Fix a score</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:20px">
+          <div style="background:{{ leader.c }};color:#15171c;border-radius:24px;padding:40px">
+            <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;opacity:.65">Leading after {{ holeNo }}</div>
+            <div style="font:800 72px/1.2 Outfit;letter-spacing:-.035em;margin-top:8px;white-space:nowrap;overflow:hidden">{{ leader.name }}</div>
+            <div style="font:600 22px Manrope;margin-top:12px;opacity:.75">{{ leader.line }}</div>
+          </div>
+          <div style="position:relative;overflow:hidden;border-radius:24px;flex:1">
+            <img alt="Red mini golf ball close-up — Kayla Farmer, Unsplash" src="https://images.unsplash.com/photo-1564607890610-2172bf275043?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.8)">
+            <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(21,23,28,.35),rgba(21,23,28,.92) 70%)"></div>
+            <div style="position:relative;padding:36px 40px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;box-sizing:border-box">
+            <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#d8d5cd">Up next · Hole {{ nextHoleNo }}</div>
+            <div style="font:800 44px/1 Outfit;letter-spacing:-.02em;margin-top:10px">{{ nextCourse.name }}</div>
+            <div style="font:400 19px/1.45 Manrope;margin-top:10px;color:#a3a8b4">{{ nextCourse.level }} · Par {{ nextCourse.par }}. Rebuild: {{ nextCourse.needs }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S18 -->
+    <div id="s18" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s18" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S18</a>Game finish &amp; stats</div>
+      <div data-screen-label="S18 Finish" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5);display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px;box-sizing:border-box">
+        <div style="background:{{ winner.c }};color:#15171c;border-radius:28px;padding:56px 64px;display:flex;flex-direction:column">
+          <div style="font:600 20px Manrope;letter-spacing:.18em;text-transform:uppercase;opacity:.65">Champion · {{ holeCount }} holes</div>
+          <div style="font:800 190px/1.15 Outfit;letter-spacing:-.05em;margin-top:16px;white-space:nowrap">{{ winner.name }}</div>
+          <div style="font:700 40px Outfit;margin-top:20px;opacity:.8">{{ winner.total }} strokes · {{ winner.vsPar }}</div>
+          <div style="margin-top:auto;position:relative;height:280px;overflow:hidden;border-radius:20px;background:repeating-linear-gradient(135deg,rgba(21,23,28,.18) 0 14px,rgba(21,23,28,.08) 14px 28px)">
+            <div style="position:absolute;left:16px;bottom:16px;background:#15171c;color:#f2efe8;padding:10px 16px;border-radius:999px;font:600 15px ui-monospace,Menlo,monospace">live snapshot from color camera · winning putt</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Final standings</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+            <sc-for list="{{ standings }}" as="s" hint-placeholder-count="4"><div style="display:flex;align-items:center;gap:20px;padding:16px 24px;border-radius:18px;background:#1e2128"><span style="font:800 26px Outfit;color:#a3a8b4;width:36px">{{ s.pos }}</span><span style="width:28px;height:28px;border-radius:50%;background:{{ s.c }}"></span><span style="font:700 34px/1.25 Outfit;white-space:nowrap;overflow:hidden;flex:1;min-width:0">{{ s.name }}</span><span style="margin-left:auto;font:800 34px Outfit">{{ s.total }}</span><span style="font:400 20px Manrope;color:#a3a8b4;width:70px;text-align:right">{{ s.vsPar }}</span></div></sc-for>
+          </div>
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3;margin-top:36px">Night stats</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+            <sc-for list="{{ stats }}" as="s" hint-placeholder-count="6"><div style="padding:18px 22px;border-radius:18px;background:#1e2128"><div style="font:600 13px Manrope;letter-spacing:.14em;text-transform:uppercase;color:#a3a8b4">{{ s.k }}</div><div style="font:800 34px/1 Outfit;letter-spacing:-.02em;margin-top:8px;display:flex;align-items:center;gap:12px"><span style="width:16px;height:16px;border-radius:50%;background:{{ s.c }}"></span>{{ s.v }}</div></div></sc-for>
+          </div>
+          <div style="margin-top:auto;display:flex;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px;background:#8be9c3;color:#0f1a15;padding:20px 26px;border-radius:18px;font:700 26px Outfit;flex:1"><span>Play again</span><span style="margin-left:auto;min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.a.g }}</span></div>
+            <div style="display:flex;align-items:center;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:20px 26px;border-radius:18px;font:700 26px Outfit;flex:1">New courses</div>
+            <div style="display:flex;align-items:center;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:20px 26px;border-radius:18px;font:700 26px Outfit;flex:1">Start screen</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- I · SETTINGS & ABOUT -->
+<section style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1)">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">I</span><span style="font:700 18px Outfit">Settings, credits &amp; changelog</span><span style="font:400 13px Manrope;color:#a3a8b4">Reached from Start → Settings or Pause → Music &amp; sound</span></div>
+  <div style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start">
+
+    <!-- S19 SETTINGS -->
+    <div id="s19" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s19" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S19</a>Settings<span style="color:#a3a8b4;font-weight:400">— theme, music, sound, controller, camera; light theme previewed live</span></div>
+      <div data-screen-label="S19 Settings" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <img alt="Pendant-lit living room — Spacejoy, Unsplash" src="https://images.unsplash.com/photo-1615529182904-14819c35db37?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.7) brightness(.75)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.97) 0%,rgba(21,23,28,.92) 48%,rgba(21,23,28,.35) 100%)"></div>
+        <div style="position:absolute;left:0;right:0;top:0;height:96px;display:flex;align-items:center;gap:24px;padding:0 56px;font:700 22px Outfit"><span>Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">Settings</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;font:600 15px Manrope;color:#a3a8b4"><span style="width:10px;height:10px;border-radius:50%;background:#8be9c3"></span>{{ H.badge }}</span><span style="display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#a3a8b4"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.b.g }}</span>Back</span></div>
+        <div style="position:absolute;left:56px;top:120px;bottom:56px;width:300px;display:flex;flex-direction:column;gap:6px">
+          <sc-for list="{{ settingsTabs }}" as="t" hint-placeholder-count="5"><div style="padding:16px 20px;border-radius:14px;font:700 22px Outfit;background:{{ t.bg }};color:{{ t.fg }}">{{ t.t }}</div></sc-for>
+          <div style="margin-top:auto;font:400 14px/1.5 Manrope;color:#a3a8b4">Settings save instantly to rumpus-settings.json. Nothing here touches the calibration file.</div>
+        </div>
+        <div style="position:absolute;left:388px;top:120px;bottom:56px;width:860px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px;display:flex;align-items:center;gap:24px">
+            <div style="flex:1;min-width:0"><div style="font:700 24px Outfit">Theme</div><div style="font:400 16px Manrope;color:#a3a8b4;margin-top:2px">Dark keeps the room dim for the camera; light is for daytime play.</div></div>
+            <div style="display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:14px"><span style="padding:12px 24px;border-radius:10px;font:700 18px Outfit;background:#f2efe8;color:#15171c">Dark</span><span style="padding:12px 24px;border-radius:10px;font:700 18px Outfit;color:#a3a8b4">Light</span><span style="padding:12px 24px;border-radius:10px;font:700 18px Outfit;color:#a3a8b4">Auto</span></div>
+          </div>
+          <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px;display:flex;flex-direction:column;gap:18px">
+            <div style="display:flex;align-items:center;gap:24px"><div style="flex:1;min-width:0"><div style="font:700 24px Outfit">Music</div><div style="font:400 16px Manrope;color:#a3a8b4;margin-top:2px">Lo-fi &amp; jazz, CC-licensed. Ducks to 30% on pause.</div></div><div style="display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:14px"><span style="padding:12px 20px;border-radius:10px;font:700 18px Outfit;background:#8be9c3;color:#0f1a15">On</span><span style="padding:12px 20px;border-radius:10px;font:700 18px Outfit;color:#a3a8b4">Off</span></div></div>
+            <div style="display:flex;align-items:center;gap:20px"><span style="font:600 15px Manrope;color:#a3a8b4;width:120px">Volume</span><div style="flex:1;height:10px;border-radius:999px;background:rgba(242,239,232,.12);position:relative"><div style="position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:999px;background:#8be9c3"></div><div style="position:absolute;left:62%;top:50%;width:28px;height:28px;border-radius:50%;background:#f2efe8;transform:translate(-50%,-50%);box-shadow:0 4px 12px rgba(0,0,0,.4)"></div></div><span style="font:700 18px Outfit;width:56px;text-align:right">62%</span></div>
+            <div style="display:flex;align-items:center;gap:20px"><span style="font:600 15px Manrope;color:#a3a8b4;width:120px">Playlist</span><div style="flex:1;display:flex;gap:8px;flex-wrap:wrap"><span style="padding:10px 16px;border-radius:999px;font:600 15px Manrope;background:#f2efe8;color:#15171c">Lounge jazz</span><span style="padding:10px 16px;border-radius:999px;font:600 15px Manrope;background:rgba(242,239,232,.08)">Lo-fi hip hop</span><span style="padding:10px 16px;border-radius:999px;font:600 15px Manrope;background:rgba(242,239,232,.08)">Both, shuffled</span><span style="padding:10px 16px;border-radius:999px;font:600 15px Manrope;background:rgba(242,239,232,.08);border:1px dashed rgba(242,239,232,.3)">+ Add a folder</span></div></div>
+          </div>
+          <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px;display:flex;flex-direction:column;gap:18px">
+            <div style="display:flex;align-items:center;gap:24px"><div style="flex:1;min-width:0"><div style="font:700 24px Outfit">Sound effects</div><div style="font:400 16px Manrope;color:#a3a8b4;margin-top:2px">Putter tick, bumps, cup plink, cheers, turn sting.</div></div><div style="display:flex;gap:6px;background:rgba(242,239,232,.06);padding:6px;border-radius:14px"><span style="padding:12px 20px;border-radius:10px;font:700 18px Outfit;background:#8be9c3;color:#0f1a15">On</span><span style="padding:12px 20px;border-radius:10px;font:700 18px Outfit;color:#a3a8b4">Off</span></div></div>
+            <div style="display:flex;align-items:center;gap:20px"><span style="font:600 15px Manrope;color:#a3a8b4;width:120px">Volume</span><div style="flex:1;height:10px;border-radius:999px;background:rgba(242,239,232,.12);position:relative"><div style="position:absolute;left:0;top:0;bottom:0;width:80%;border-radius:999px;background:#8be9c3"></div><div style="position:absolute;left:80%;top:50%;width:28px;height:28px;border-radius:50%;background:#f2efe8;transform:translate(-50%,-50%);box-shadow:0 4px 12px rgba(0,0,0,.4)"></div></div><span style="font:700 18px Outfit;width:56px;text-align:right">80%</span></div>
+            <div style="display:flex;align-items:center;gap:24px"><div style="flex:1;min-width:0"><div style="font:700 20px Outfit">Announcer</div><div style="font:400 15px Manrope;color:#a3a8b4">Calls the next player’s name out loud — handy when nobody is watching the screen.</div></div><div style="width:64px;height:36px;border-radius:999px;background:#8be9c3;position:relative;flex:none"><div style="position:absolute;right:4px;top:4px;width:28px;height:28px;border-radius:50%;background:#0f1a15"></div></div></div>
+          </div>
+          <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+            <div style="display:flex;align-items:center;gap:20px"><div style="flex:1;min-width:0"><div style="font:700 20px Outfit">Controller rumble</div><div style="font:400 15px Manrope;color:#a3a8b4">Buzz on hole-out and turn change.</div></div><div style="width:64px;height:36px;border-radius:999px;background:#8be9c3;position:relative;flex:none"><div style="position:absolute;right:4px;top:4px;width:28px;height:28px;border-radius:50%;background:#0f1a15"></div></div></div>
+            <div style="display:flex;align-items:center;gap:20px"><div style="flex:1;min-width:0"><div style="font:700 20px Outfit">Show camera feed</div><div style="font:400 15px Manrope;color:#a3a8b4">Off = plain floor with zones only.</div></div><div style="width:64px;height:36px;border-radius:999px;background:#8be9c3;position:relative;flex:none"><div style="position:absolute;right:4px;top:4px;width:28px;height:28px;border-radius:50%;background:#0f1a15"></div></div></div>
+          </div>
+        </div>
+        <div style="position:absolute;left:1288px;right:56px;top:120px;bottom:56px;display:flex;flex-direction:column;gap:12px">
+          <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#d8d5cd;text-shadow:0 1px 8px rgba(0,0,0,.6)">Theme preview · Light</div>
+          <div style="background:#f4f1ea;color:#15171c;border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 50px rgba(0,0,0,.35)">
+            <div style="background:{{ active.c }};border-radius:14px;padding:16px 20px"><div style="font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;opacity:.7">Your turn</div><div style="font:800 40px/1.2 Outfit;letter-spacing:-.03em;margin-top:4px;white-space:nowrap;overflow:hidden">{{ active.name }}</div></div>
+            <div style="display:flex;gap:8px"><sc-for list="{{ others }}" as="p" hint-placeholder-count="3"><div style="flex:1;min-width:0;background:#fff;border:1px solid rgba(21,23,28,.08);border-radius:12px;padding:12px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:{{ p.c }};flex:none"></span><span style="font:700 15px/1.3 Outfit;white-space:nowrap;overflow:hidden">{{ p.name }}</span></div></sc-for></div>
+            <div style="display:flex;align-items:center;gap:12px;background:#0f7a5a;color:#f2efe8;padding:14px 18px;border-radius:12px;font:700 18px Outfit"><span>Primary action</span><span style="margin-left:auto;min-width:26px;height:26px;padding:0 7px;border-radius:{{ H.a.r }};background:{{ H.a.bg }};color:{{ H.a.fg }};display:grid;place-items:center;font:800 12px Outfit">{{ H.a.g }}</span></div>
+            <div style="font:400 13px/1.45 Manrope;color:#5c6068">Light theme swaps ground/ink and deepens mint to #0f7a5a so contrast stays above 4.5:1. Ball colors are untouched.</div>
+          </div>
+          <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+            <a href="#s20" style="text-decoration:none;color:#f2efe8;display:flex;align-items:center;gap:12px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:18px 22px;border-radius:16px;font:700 22px Outfit"><span>Credits</span><span style="margin-left:auto;color:#a3a8b4;font:400 16px Manrope">→</span></a>
+            <a href="#s21" style="text-decoration:none;color:#f2efe8;display:flex;align-items:center;gap:12px;background:rgba(21,23,28,.7);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.12);padding:18px 22px;border-radius:16px;font:700 22px Outfit"><span>What’s new</span><span style="margin-left:auto;padding:4px 10px;border-radius:999px;background:#8be9c3;color:#0f1a15;font:700 13px Outfit">{{ version }}</span></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S20 CREDITS -->
+    <div id="s20" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s20" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S20</a>Credits<span style="color:#a3a8b4;font-weight:400">— every CC attribution the licenses require, generated from the asset manifest</span></div>
+      <div data-screen-label="S20 Credits" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <img alt="Blue golf ball — Aaron Burden, Unsplash" src="https://images.unsplash.com/photo-1439066424404-a0a885e04059?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.8) brightness(.7)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.3) 0%,rgba(21,23,28,.85) 45%,rgba(21,23,28,.97) 100%)"></div>
+        <div style="position:absolute;left:0;right:0;top:0;height:96px;display:flex;align-items:center;gap:24px;padding:0 56px;font:700 22px Outfit"><span>Rumpus Golf</span><span style="font:400 18px Manrope;color:#d8d5cd">Credits</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#a3a8b4"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.b.g }}</span>Back</span></div>
+        <div style="position:absolute;left:56px;bottom:56px;width:560px">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3;text-shadow:0 1px 8px rgba(0,0,0,.6)">Made with</div>
+          <div style="font:800 88px/1 Outfit;letter-spacing:-.04em;margin-top:10px;text-shadow:0 2px 20px rgba(0,0,0,.5)">Books,<br>a cup and<br>a camera.</div>
+          <div style="font:400 18px/1.5 Manrope;color:#d8d5cd;margin-top:20px;text-shadow:0 1px 8px rgba(0,0,0,.6)">Rumpus Golf {{ version }} · Python 3.11 · OpenCV · libfreenect / libfreenect2. No machine learning, no cloud — just your living room.</div>
+        </div>
+        <div style="position:absolute;left:760px;right:56px;top:120px;bottom:56px;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-content:start">
+          <sc-for list="{{ credits }}" as="g" hint-placeholder-count="4">
+            <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px">
+              <div style="font:600 13px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#8be9c3">{{ g.k }}</div>
+              <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+                <sc-for list="{{ g.items }}" as="i" hint-placeholder-count="3"><div style="display:flex;gap:12px;align-items:flex-start;min-width:0"><div style="flex:1;min-width:0"><div style="font:700 19px/1.3 Outfit">{{ i.t }}</div><div style="font:400 15px/1.4 Manrope;color:#a3a8b4">{{ i.d }}</div></div><span style="font:600 12px Manrope;color:#8be9c3;padding:3px 8px;border-radius:999px;border:1px solid rgba(139,233,195,.35);flex:none;margin-top:3px">{{ i.lic }}</span></div></sc-for>
+              </div>
+            </div>
+          </sc-for>
+          <div style="grid-column:1/3;font:400 14px/1.5 Manrope;color:#a3a8b4">The list scrolls with the stick when it outgrows the screen; every entry links out on click. Attribution strings are copied verbatim from each license holder.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S21 CHANGELOG -->
+    <div id="s21" style="display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px">
+      <div style="display:flex;align-items:baseline;gap:10px;font:600 13px Manrope"><a href="#s21" style="font:700 11px Outfit;background:#f2efe8;color:#15171c;padding:3px 8px;border-radius:6px;text-decoration:none">S21</a>What’s new (changelog)<span style="color:#a3a8b4;font-weight:400">— read from CHANGELOG.md; the entry is hidden in Settings when the file is empty</span></div>
+      <div data-screen-label="S21 Changelog" style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#15171c;color:#f2efe8;border-radius:28px;box-shadow:0 30px 80px rgba(0,0,0,.5)">
+        <img alt="Gray sofa and coffee table — Katja Rooke, Unsplash" src="https://images.unsplash.com/photo-1605774337664-7a846e9cdf17?w=1800&q=70&auto=format&fit=crop" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.7) brightness(.7)">
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(21,23,28,.97) 0%,rgba(21,23,28,.9) 55%,rgba(21,23,28,.3) 100%)"></div>
+        <div style="position:absolute;left:0;right:0;top:0;height:96px;display:flex;align-items:center;gap:24px;padding:0 56px;font:700 22px Outfit"><span>Rumpus Golf</span><span style="font:400 18px Manrope;color:#a3a8b4">What’s new</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;font:600 15px Manrope;color:#a3a8b4"><span style="min-width:30px;height:30px;padding:0 8px;border-radius:{{ H.b.r }};background:{{ H.b.bg }};color:{{ H.b.fg }};display:grid;place-items:center;font:800 14px Outfit">{{ H.b.g }}</span>Back</span></div>
+        <div style="position:absolute;left:56px;top:120px;width:420px">
+          <div style="font:600 14px Manrope;letter-spacing:.18em;text-transform:uppercase;color:#8be9c3">Current version</div>
+          <div style="font:800 120px/1 Outfit;letter-spacing:-.05em;margin-top:8px">{{ version }}</div>
+          <div style="font:400 18px/1.5 Manrope;color:#a3a8b4;margin-top:14px">Newest release opens expanded; older ones collapse to a headline. Tags: <span style="color:#8be9c3">new</span> · <span style="color:#f2efe8">improved</span> · <span style="color:#ff6b57">fixed</span>.</div>
+          <div style="margin-top:32px;display:flex;align-items:center;gap:10px;font:600 15px Manrope;color:#f2efe8;background:rgba(242,239,232,.07);border:1px solid rgba(242,239,232,.12);padding:12px 16px 12px 12px;border-radius:999px;width:max-content"><span style="min-width:28px;height:28px;padding:0 8px;border-radius:{{ H.rs.r }};background:{{ H.rs.bg }};color:{{ H.rs.fg }};display:grid;place-items:center;font:800 13px Outfit">{{ H.rs.g }}</span>Scroll releases</div>
+        </div>
+        <div style="position:absolute;left:540px;width:900px;top:120px;bottom:56px;display:flex;flex-direction:column;gap:14px">
+          <sc-for list="{{ changelog }}" as="r" hint-placeholder-count="3">
+            <div style="background:rgba(30,33,40,.85);backdrop-filter:blur(20px);border:1px solid rgba(242,239,232,.1);border-radius:20px;padding:24px 28px">
+              <div style="display:flex;align-items:baseline;gap:16px"><span style="font:800 30px Outfit;letter-spacing:-.02em">{{ r.v }}</span><span style="font:400 16px Manrope;color:#a3a8b4">{{ r.date }}</span><span style="margin-left:auto;font:600 14px Manrope;color:{{ r.tagFg }};padding:4px 10px;border-radius:999px;background:{{ r.tagBg }}">{{ r.tag }}</span></div>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+                <sc-for list="{{ r.items }}" as="i" hint-placeholder-count="3"><div style="display:flex;gap:12px;align-items:baseline;font:400 18px/1.4 Manrope"><span style="font:700 11px Manrope;letter-spacing:.12em;text-transform:uppercase;color:{{ i.c }};width:78px;flex:none;padding-top:5px">{{ i.k }}</span><span>{{ i.t }}</span></div></sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- F · COURSES -->
+<section id="courses" style="padding:44px 56px;border-bottom:1px solid rgba(242,239,232,.1);scroll-margin-top:16px">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:24px"><span style="font:800 26px Outfit;color:#8be9c3">F</span><span style="font:700 18px Outfit">The three courses</span><span style="font:400 13px Manrope;color:#a3a8b4">Top-down for a 3.0 × 2.0 m area; scaled from the play-area polygon, so smaller rooms just shrink the layout</span></div>
+  <div style="display:grid;grid-template-columns:repeat(3,600px);gap:32px">
+    <sc-for list="{{ courses }}" as="c" hint-placeholder-count="3">
+      <div style="display:flex;flex-direction:column;gap:14px;background:#15171c;border-radius:24px;padding:28px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><div><div style="font:600 12px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#8be9c3">{{ c.level }} · Par {{ c.par }}</div><div style="font:800 34px/1 Outfit;letter-spacing:-.02em;margin-top:4px">{{ c.name }}</div></div><div style="font:600 13px Manrope;color:#a3a8b4">3.0 × 2.0 m</div></div>
+        <div style="aspect-ratio:3/2;position:relative;background:#1e2128;border-radius:16px;overflow:hidden">
+          <sc-for list="{{ c.obs }}" as="o" hint-placeholder-count="3"><div style="position:absolute;left:{{ o.x }}%;top:{{ o.y }}%;width:{{ o.w }}%;height:{{ o.h }}%;background:{{ o.fill }};border-radius:4px;display:grid;place-items:center;font:700 11px Outfit;color:{{ o.lfg }};text-align:center;padding:2px">{{ o.label }}</div></sc-for>
+          <div style="position:absolute;left:{{ c.sx }}%;top:{{ c.sy }}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;border:3px solid #f2efe8;display:grid;place-items:center;font:700 10px Outfit">START</div>
+          <div style="position:absolute;left:{{ c.hx }}%;top:{{ c.hy }}%;width:7%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:#8be9c3"></div>
+          <div style="position:absolute;left:10px;bottom:6px;font:600 11px Manrope;color:#a3a8b4">camera side ↓</div>
+        </div>
+        <div style="font:400 15px/1.5 Manrope;color:#a3a8b4">{{ c.blurb }}</div>
+        <div style="display:grid;gap:6px;border-top:1px solid rgba(242,239,232,.1);padding-top:12px">
+          <sc-for list="{{ c.obs }}" as="o" hint-placeholder-count="3"><div style="display:flex;gap:12px;font:400 14px Manrope"><span style="width:14px;height:14px;border-radius:4px;background:{{ o.fill }};flex:none;margin-top:3px"></span><span><strong style="font-weight:700;color:#f2efe8">{{ o.label }}</strong> — {{ o.item }} · {{ o.size }}</span></div></sc-for>
+          <div style="font:400 13px Manrope;color:#a3a8b4;margin-top:4px">{{ c.rule }}</div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</section>
+
+<!-- G/H · INPUT & ASSETS -->
+<section id="assets" style="padding:44px 56px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px;max-width:1920px;scroll-margin-top:16px">
+  <div>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px"><span style="font:800 26px Outfit;color:#8be9c3">G</span><span style="font:700 18px Outfit">Input map</span><span style="font:400 13px Manrope;color:#a3a8b4">Same verbs everywhere; the glyph on each button is the source of truth</span></div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1.1fr;font:400 14px Manrope;border-top:1px solid rgba(242,239,232,.15)">
+      <div style="padding:10px 0;font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.15)">Verb</div><div style="padding:10px 0;font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.15)">Mouse / touch</div><div style="padding:10px 0;font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.15)">Keyboard</div><div style="padding:10px 0;font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#a3a8b4;border-bottom:1px solid rgba(242,239,232,.15)">Xbox controller</div>
+      <sc-for list="{{ inputs }}" as="i" hint-placeholder-count="8">
+        <div style="padding:10px 0;border-bottom:1px solid rgba(242,239,232,.08);font-weight:600">{{ i.v }}</div><div style="padding:10px 0;border-bottom:1px solid rgba(242,239,232,.08);color:#a3a8b4">{{ i.m }}</div><div style="padding:10px 0;border-bottom:1px solid rgba(242,239,232,.08);color:#a3a8b4">{{ i.k }}</div><div style="padding:8px 0;border-bottom:1px solid rgba(242,239,232,.08);display:flex;align-items:center;gap:8px"><span style="min-width:26px;height:26px;padding:0 7px;border-radius:{{ i.gl.r }};background:{{ i.gl.bg }};color:{{ i.gl.fg }};display:grid;place-items:center;font:800 12px Outfit">{{ i.gl.g }}</span><span style="color:#a3a8b4">{{ i.g }}</span></div>
+      </sc-for>
+    </div>
+    <div style="margin-top:28px;font:700 15px Outfit;border-bottom:1px solid rgba(242,239,232,.15);padding-bottom:8px">Rules the UI relies on</div>
+    <div style="display:grid;gap:6px;font:400 14px/1.55 Manrope;color:#a3a8b4;margin-top:10px">
+      <div>Stroke = ball goes stopped → moving. Turn ends when it stops (2 cm / 0.5 s), then <a href="#s12">S12</a> wipes to the next player.</div>
+      <div>Holed = stopped inside the hole zone (v2 also checks height). Rolling through or bouncing off never counts.</div>
+      <div>Undo pops the last event within the current hole; Fix score edits totals directly and is logged.</div>
+      <div>Lost ball never blocks play; ambiguous re-appearance pauses to <a href="#s09">S09</a>-style re-assignment.</div>
+      <div>Controller detected → glyph hints + focus ring moves with the left stick / d-pad; no controller → keycaps, mouse and touch. Both modes coexist; nothing is controller-only.</div>
+    </div>
+  </div>
+  <div>
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:20px"><span style="font:800 26px Outfit;color:#8be9c3">H</span><span style="font:700 18px Outfit">Royalty-free assets</span><span style="font:400 13px Manrope;color:#a3a8b4">Licenses checked; attribution strings ready for the credits screen</span></div>
+    <div style="display:grid;font:400 14px/1.5 Manrope;border-top:1px solid rgba(242,239,232,.15)">
+      <sc-for list="{{ assets }}" as="a" hint-placeholder-count="7"><div style="display:grid;grid-template-columns:90px 1fr auto;gap:16px;padding:12px 0;border-bottom:1px solid rgba(242,239,232,.08)"><span style="font:600 11px Manrope;letter-spacing:.16em;text-transform:uppercase;color:#8be9c3;padding-top:3px">{{ a.kind }}</span><span style="color:#a3a8b4"><strong style="font-weight:700;color:#f2efe8">{{ a.t }}</strong> — {{ a.d }}<br><a href="{{ a.url }}" target="_blank" rel="noreferrer">{{ a.url }}</a></span><span style="font:600 12px Manrope;color:#a3a8b4;white-space:nowrap">{{ a.lic }}</span></div></sc-for>
+    </div>
+    <div style="margin-top:20px;font:400 13px/1.55 Manrope;color:#a3a8b4">Sound design: turn-change sting is a two-note vibraphone; hole-out is a short cheer + a “plink” in the cup; strokes get a soft putter tick from the impact pack. Music at −18 LUFS, ducks to 30% on Pause.</div>
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;inputMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Xbox controller&quot;,&quot;Keyboard &amp; mouse&quot;],&quot;default&quot;:&quot;Xbox controller&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Input&quot;},&quot;activePlayer&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Maya&quot;,&quot;Leo&quot;,&quot;Sam&quot;,&quot;Ava&quot;],&quot;default&quot;:&quot;Leo&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Game state&quot;},&quot;course&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Beginner&quot;,&quot;Advanced&quot;,&quot;Expert&quot;],&quot;default&quot;:&quot;Beginner&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Game state&quot;},&quot;holeCount&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:9,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Rules&quot;},&quot;strokeCap&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:8,&quot;min&quot;:3,&quot;max&quot;:12,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Rules&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const P = this.props;
+    const strokeCap = P.strokeCap ?? 8;
+    const holeCount = P.holeCount ?? 3;
+    const pad = (P.inputMode ?? 'Xbox controller') === 'Xbox controller';
+    const INK = '#15171c', PAPER = '#f2efe8', MINT = '#8be9c3', WARN = '#ff6b57', MUTED = '#a3a8b4';
+
+    // Xbox glyphs vs keycaps — one object drives every hint on the page
+    const xb = (g, bg, fg = '#fff', r = '50%') => ({ g, bg, fg, r });
+    const key = (g) => ({ g, bg: 'rgba(242,239,232,.14)', fg: PAPER, r: '8px' });
+    const H = pad ? {
+      a: xb('A', '#3aa655'), b: xb('B', '#e04343'), x: xb('X', '#3d7dff'), y: xb('Y', '#f2c230', INK),
+      lb: xb('LB', '#3a3f4a', '#fff', '8px'), rb: xb('RB', '#3a3f4a', '#fff', '8px'), menu: xb('≡', '#3a3f4a'), ls: xb('L', '#3a3f4a'), rs: xb('R', '#3a3f4a'),
+      badge: 'Controller connected',
+    } : {
+      a: key('Enter'), b: key('Esc'), x: key('Z'), y: key('Y'), lb: key('Shift ⇥'), rb: key('⇥'), menu: key('Esc'), ls: key('← ↑ → ↓'), rs: key('+ / −'),
+      badge: 'Keyboard & mouse',
+    };
+
+    const players = [
+      { name: 'Maya', c: '#ff8a3d', hue: 'Orange', scores: [3, 4], cur: 3, state: 'holed in 3' },
+      { name: 'Leo', c: '#ff5fa8', hue: 'Pink', scores: [2, 3], cur: 2, state: 'in play' },
+      { name: 'Sam', c: '#5b8cff', hue: 'Blue', scores: [4, 5], cur: 4, state: 'in play' },
+      { name: 'Ava', c: '#ffd84d', hue: 'Yellow', scores: [3, 2], cur: 1, state: 'in play' },
+    ].map((p, i) => ({ ...p, order: i + 1 }));
+    const ai = Math.max(0, players.findIndex(p => p.name === (P.activePlayer ?? 'Leo')));
+    const a = players[ai], nx = players[(ai + 1) % players.length];
+    const active = { ...a, stroke: a.cur, strokePlus: a.cur + ' + 1', status: 'Ball stopped. Putt when ready.', motion: 'stopped · 0.8 m from cup', parLine: a.cur <= 2 ? 'Under par — birdie!' : a.cur === 3 ? 'On par' : 'Over par, still counts' };
+    const next = { ...nx, nextStroke: nx.cur + 1 };
+    const others = players.filter((_, i) => i !== ai).map(p => ({ ...p, holeLine: p.state === 'in play' ? `Stroke ${p.cur} · in play` : `Holed · ${p.cur}`, hiddenLine: p.name === 'Sam' ? `Stroke ${p.cur} · hidden` : p.state === 'in play' ? `Stroke ${p.cur} · in play` : `Holed · ${p.cur}` }));
+
+    const BOOK = '#f2efe8', SOFT = '#6b7280', TUBE = '#c9c4b8', HAZ = 'repeating-linear-gradient(45deg,#ff6b57 0 4px,#b9483a 4px 8px)';
+    const courses = [
+      { level: 'Beginner', name: 'The Hallway', par: 2, sx: 12, sy: 50, hx: 88, hy: 50,
+        blurb: 'A straight run with one book to skirt. Teaches ball speed on your floor.', needs: '1 hardback book, 1 cushion', rule: 'Cushion is a bumper: ricochets are legal.',
+        obs: [
+          { x: 47, y: 30, w: 4, h: 45, fill: BOOK, lfg: INK, label: 'Book', item: 'hardback, on its edge', size: '25 × 4 cm', tick: '✓' },
+          { x: 30, y: 2, w: 40, h: 9, fill: SOFT, lfg: PAPER, label: 'Cushion', item: 'sofa cushion, top edge bumper', size: '~60 × 15 cm', tick: '✓' },
+        ] },
+      { level: 'Advanced', name: 'Dogleg Left', par: 3, sx: 10, sy: 82, hx: 88, hy: 16,
+        blurb: 'Two book walls force a bank shot; a cardboard tunnel is the shortcut if you dare.', needs: '3 hardback books, 1 paper-towel roll (cut lengthwise), 1 shoebox', rule: 'Ball through the tunnel = −1 stroke bonus.',
+        obs: [
+          { x: 33, y: 0, w: 4, h: 62, fill: BOOK, lfg: INK, label: 'Wall A', item: '2 books end to end', size: '50 × 4 cm', tick: '✓' },
+          { x: 63, y: 38, w: 4, h: 62, fill: BOOK, lfg: INK, label: 'Wall B', item: '1 book on its edge', size: '25 × 4 cm', tick: '' },
+          { x: 44, y: 14, w: 12, h: 8, fill: TUBE, lfg: INK, label: 'Tunnel', item: 'paper-towel roll, cut', size: '28 × 6 cm', tick: '' },
+          { x: 78, y: 62, w: 14, h: 22, fill: SOFT, lfg: PAPER, label: 'Box', item: 'shoebox, closed', size: '32 × 20 cm', tick: '✓' },
+        ] },
+      { level: 'Expert', name: 'The Gauntlet', par: 4, sx: 8, sy: 50, hx: 91, hy: 50,
+        blurb: 'Thread a shoebox gate, hop a book ramp, avoid the towel — it costs a stroke.', needs: '2 shoeboxes, 3 books (stacked ramp), 1 hand towel, 1 cushion', rule: 'Towel is a hazard: stopping on it = +1, play on from there.',
+        obs: [
+          { x: 28, y: 4, w: 9, h: 30, fill: SOFT, lfg: PAPER, label: 'Gate N', item: 'shoebox', size: '32 × 20 cm', tick: '✓' },
+          { x: 28, y: 66, w: 9, h: 30, fill: SOFT, lfg: PAPER, label: 'Gate S', item: 'shoebox', size: '32 × 20 cm', tick: '✓' },
+          { x: 52, y: 36, w: 12, h: 28, fill: BOOK, lfg: INK, label: 'Ramp', item: '3 books, stepped', size: '30 × 25 cm', tick: '' },
+          { x: 70, y: 6, w: 18, h: 30, fill: HAZ, lfg: PAPER, label: 'Towel', item: 'hand towel, flat', size: '50 × 30 cm', tick: '' },
+          { x: 72, y: 74, w: 24, h: 12, fill: SOFT, lfg: PAPER, label: 'Bumper', item: 'cushion', size: '~60 × 15 cm', tick: '✓' },
+        ] },
+    ].map(c => { const sel = c.level === (P.course ?? 'Beginner'); return { ...c, obs: c.obs.map(o => ({ ...o, tickBg: o.tick ? MINT : 'transparent', tickBd: o.tick ? MINT : 'rgba(242,239,232,.3)' })), cardBg: sel ? PAPER : '#1e2128', cardFg: sel ? INK : PAPER, cardBd: sel ? PAPER : 'transparent', mapBg: sel ? '#e3e0d8' : '#15171c', parBg: sel ? INK : 'rgba(242,239,232,.08)', parFg: sel ? PAPER : PAPER, btn: sel ? 'Selected' : 'Choose', btnBg: sel ? MINT : 'rgba(242,239,232,.08)', btnFg: sel ? '#0f1a15' : PAPER }; });
+    const courseIdx = Math.max(0, courses.findIndex(c => c.level === (P.course ?? 'Beginner')));
+    const course = courses[courseIdx], nextCourse = courses[(courseIdx + 1) % 3];
+
+    const map = (u, v) => { const t = v / 100, L = 420 + (160 - 420) * t, R = 1500 + (1760 - 1500) * t; return [L + (R - L) * u / 100, 300 + 680 * t]; };
+    const pt = (u, v) => map(u, v).map(Math.round).join(',');
+    const P$ = (x, y) => ({ xp: (x / 19.2).toFixed(2), yp: (y / 10.8).toFixed(2) });
+    const feedObs = course.obs.map(o => { const [lx, ly] = map(o.x, o.y); return { ...o, ...P$(lx, ly - 12), pts: [pt(o.x, o.y), pt(o.x + o.w, o.y), pt(o.x + o.w, o.y + o.h), pt(o.x, o.y + o.h)].join(' '), lx: Math.round(lx), ly: Math.round(ly) - 12, ffill: o.tick ? 'rgba(242,239,232,.12)' : 'rgba(139,233,195,.14)', fstroke: o.tick ? PAPER : MINT }; });
+    // Detected footprints (approximate — jittered off the template), + one false detection
+    const quad = (x, y, w, h) => [pt(x, y), pt(x + w, y), pt(x + w, y + h), pt(x, y + h)].join(' ');
+    const confs = [0.92, 0.81, 0.66, 0.95, 0.88];
+    const detObs = course.obs.map((o, i) => { const x = o.x + (i % 2 ? 1.2 : -0.8), y = o.y + (i % 3 ? 1.5 : -1), w = o.w + 1.4, h = o.h - 0.8; const [lx, ly] = map(x, y); const conf = confs[i % 5]; return { n: i + 1, ...P$(lx, ly - 12), label: o.label, item: o.item, size: o.size, conf: Math.round(conf * 100) + '%', low: conf < 0.7, confBg: conf < 0.7 ? WARN : MINT, pts: quad(x, y, w, h), lx: Math.round(lx), ly: Math.round(ly) - 12, handles: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(([u, v], k) => { const [hx, hy] = map(u, v); return { x: Math.round(hx), y: Math.round(hy), r: k === 2 ? 16 : 11, c: k === 2 ? MINT : PAPER }; }) }; });
+    const falseDet = (() => { const [lx, ly] = map(14, 92); return { pts: quad(12, 90, 8, 7), lx: Math.round(lx), ly: Math.round(ly) - 12, ...P$(lx, ly - 12) }; })();
+    const drawPts = [[58, 84], [68, 84], [68, 94]].map(([u, v]) => { const [x, y] = map(u, v); return { x: Math.round(x), y: Math.round(y) }; });
+    const drawLine = drawPts.map(p => `${p.x},${p.y}`).join(' ');
+    const detRows = [...detObs.map((d, i) => ({ ...d, status: i === 0 ? 'Selected' : i === 1 ? 'Confirmed' : 'Pending', sBg: i === 0 ? MINT : i === 1 ? 'rgba(242,239,232,.14)' : 'transparent', sFg: i === 0 ? '#0f1a15' : PAPER, sBd: i === 1 ? 'transparent' : i === 0 ? MINT : 'rgba(242,239,232,.3)' })), { n: course.obs.length + 1, label: 'Shadow near the sofa', item: 'deleted — was a false detection', size: '', conf: '41%', confBg: WARN, status: 'Deleted', sBg: 'transparent', sFg: MUTED, sBd: 'rgba(242,239,232,.2)' }, { n: course.obs.length + 2, label: 'Drawing…', item: 'manual polygon, 3 of ? points', size: '', conf: '—', confBg: 'rgba(242,239,232,.14)', status: 'Drawing', sBg: 'transparent', sFg: MINT, sBd: MINT }];
+    const boxObs = feedObs.find(o => /Box|Gate S|Bumper|Book|Wall/.test(o.label)) || feedObs[0];
+    const hiddenBall = (() => { const p = boxObs.pts.split(' ')[3].split(',').map(Number); return { x: p[0] - 6, y: p[1] - 30, c: '#5b8cff', name: 'Sam', ...P$(p[0] - 6, p[1] + 4) }; })();
+    const [sx, sy] = map(course.sx, course.sy), [hx, hy] = map(course.hx, course.hy);
+    const feedStart = { x: Math.round(sx), y: Math.round(sy), ly: Math.round(sy) - 86 };
+    const feedHole = { x: Math.round(hx), y: Math.round(hy), ly: Math.round(hy) - 60 };
+
+    const ballsOnFloor = players.map((p, i) => { const [x, y] = map(20 + i * 18, 45 + (i % 2) * 25); const tag = `${p.hue} · ${p.name}`; return { ...p, x: Math.round(x), y: Math.round(y), ...P$(x + 34, y), tag }; });
+    const ballsInPlay = players.map((p, i) => { const [x, y] = map(...[[52, 55], [70, 42], [30, 30], [45, 75]][i]); return { ...p, x: Math.round(x), y: Math.round(y), ...P$(x, y - 34) }; });
+    const trail = Array.from({ length: 7 }, (_, i) => { const t = i / 7; const [x, y] = map(20 + 32 * t, 82 - 27 * t); return { x: Math.round(x), y: Math.round(y), r: 6 + t * 8, c: a.c, o: (0.2 + t * 0.7).toFixed(2) }; });
+
+    const stepRail = (cur) => ['Floor', 'Play area', 'Course', 'Cup', 'Balls & players'].map((t, i) => { const n = i + 1, done = n < cur, on = n === cur; return { n: done ? '✓' : n, t, bg: on ? PAPER : 'transparent', fg: on ? INK : done ? PAPER : MUTED, bd: on ? PAPER : 'rgba(242,239,232,.15)', nbg: on ? INK : done ? MINT : 'rgba(242,239,232,.12)', nfg: on ? PAPER : done ? '#0f1a15' : MUTED }; });
+
+    const holeOpts = Array.from({ length: 9 }, (_, i) => ({ n: i + 1, bg: i + 1 === holeCount ? PAPER : 'transparent', fg: i + 1 === holeCount ? INK : MUTED }));
+    const holeNo = 2, nextHoleNo = Math.min(holeCount, 3);
+    const holeHeads = Array.from({ length: holeCount }, (_, i) => `H${i + 1}`);
+    const pars = [2, 3, 4];
+    const bestPer = Array.from({ length: holeCount }, (_, h) => Math.min(...players.map(p => p.scores[h] ?? 99)));
+    const card = players.map(p => ({ ...p, total: p.scores.reduce((s, v) => s + v, 0), cells: Array.from({ length: holeCount }, (_, h) => { const v = p.scores[h]; if (v == null) return { v: '○', col: 'rgba(242,239,232,.3)', w: 400 }; return { v, col: v > pars[h % 3] ? WARN : PAPER, w: v === bestPer[h] ? 800 : 400 }; }) }));
+    const sorted = [...card].sort((x, y) => x.total - y.total);
+    const leader = { ...sorted[0], line: `${sorted[0].total} strokes · ${sorted[0].total - sorted[1].total} ahead of ${sorted[1].name}` };
+    const parTotal = pars.slice(0, holeCount).reduce((s, v) => s + v, 0);
+    const vs = t => { const d = t - parTotal; return d === 0 ? 'even' : d > 0 ? `+${d}` : `${d}`; };
+    const finals = players.map((p, i) => ({ ...p, total: p.scores.reduce((s, v) => s + v, 0) + (holeCount > 2 ? [4, 3, 6, 5][i] : 0) })).sort((x, y) => x.total - y.total);
+    const standings = finals.map((p, i) => ({ ...p, pos: i + 1, vsPar: vs(p.total) }));
+    const winner = { ...standings[0] };
+    const stats = [
+      { k: 'Best hole', v: 'Ava · 2 on Dogleg', c: '#ffd84d' }, { k: 'Longest holed putt', v: 'Leo · 2.6 m', c: '#ff5fa8' },
+      { k: 'Most out of bounds', v: 'Sam · 3', c: '#5b8cff' }, { k: 'Tunnel shots', v: 'Maya · 2', c: '#ff8a3d' },
+      { k: 'Total strokes', v: standings.reduce((s, p) => s + p.total, 0), c: MINT }, { k: 'Time played', v: '38 min', c: MINT },
+    ];
+    const pauseItems = [
+      { t: 'Resume', h: H.b, bg: MINT, fg: '#0f1a15' }, { t: 'Undo last shot', h: H.x }, { t: 'Fix score', h: key('F') }, { t: 'Recalibrate…', h: key('R') },
+      { t: 'Change course for this hole', h: key('C') }, { t: 'Music & sound', h: key('M') }, { t: 'Quit to start', h: key('Q') },
+    ].map(m => ({ bg: 'rgba(242,239,232,.06)', fg: PAPER, ...m }));
+    const pauseItemsRecal = pauseItems.map(m => m.t === 'Recalibrate…' ? { ...m, h: H.a, bg: MINT, fg: '#0f1a15' } : m.t === 'Resume' ? { ...m, h: H.b, bg: 'rgba(242,239,232,.06)', fg: PAPER } : m);
+    const recal = [
+      { t: 'Re-detect cup', d: 'Someone kicked it. Re-runs step 4 only.' }, { t: 'Re-assign balls', d: 'Lighting changed or balls swapped. Step 5.' },
+      { t: 'Redraw play area', d: 'Rug moved or you want a bigger course. Step 2.' }, { t: 'Edit obstacles', d: 'Re-detect, delete or reshape footprints. Step 3c.' },
+      { t: 'Redo floor snapshot', d: 'Camera or tripod moved. The wizard runs again with old values as hints.' }, { t: 'Verify only', d: 'Show all zones over the feed and confirm. Same as S03.' },
+    ];
+    const undo = { line: `${a.name} · stroke ${a.cur} → ${a.cur - 1} (mis-tracked bump)` };
+    const events = [
+      { t: '12:41', c: a.c, txt: `${a.name} stroke ${a.cur} — ball stopped 0.8 m from cup` }, { t: '12:40', c: '#ffd84d', txt: 'Ava stroke 1 — in play' },
+      { t: '12:39', c: '#5b8cff', txt: 'Sam stroke 4 — out of bounds, +1' }, { t: '12:38', c: '#ff8a3d', txt: 'Maya holed in 3' },
+      { t: '12:37', c: a.c, txt: `${a.name} stroke 1 — in play` }, { t: '12:36', c: MUTED, txt: 'Hole 2 started — Dogleg Left' },
+    ];
+    const G = { a: xb('A', '#3aa655'), b: xb('B', '#e04343'), x: xb('X', '#3d7dff'), y: xb('Y', '#f2c230', INK), lb: xb('LB', '#3a3f4a', '#fff', '8px'), rb: xb('RB', '#3a3f4a', '#fff', '8px'), menu: xb('≡', '#3a3f4a'), ls: xb('L', '#3a3f4a'), rs: xb('R', '#3a3f4a') };
+    const inputs = [
+      { v: 'Confirm / primary', m: 'Click / tap button', k: 'Enter · Space', g: 'A', gl: G.a }, { v: 'Back / cancel', m: 'Back button', k: 'Esc', g: 'B', gl: G.b },
+      { v: 'Undo / alternate', m: 'Secondary button', k: 'Z · R', g: 'X (hold 0.5 s in play)', gl: G.x }, { v: 'Secondary action', m: 'Tertiary button', k: 'Y · D', g: 'Y', gl: G.y },
+      { v: 'Move zone / obstacle / focus', m: 'Drag', k: 'Arrows (Shift = fine)', g: 'Left stick · D-pad', gl: G.ls }, { v: 'Resize circle', m: 'Drag dot handle', k: '+ / −', g: 'Right stick ↕', gl: G.rs },
+      { v: 'Next / prev object or course', m: 'Click it', k: 'Tab · Shift-Tab', g: 'RB · LB', gl: G.rb }, { v: 'Pause / finish step', m: 'HUD button', k: 'Esc', g: 'Menu (≡)', gl: G.menu },
+    ];
+    const assets = [
+      { kind: 'Music', t: 'Lobby Time', d: 'Kevin MacLeod — lounge jazz for menus and setup', url: 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Lobby%20Time.mp3', lic: 'CC BY 4.0' },
+      { kind: 'Music', t: 'Backed Vibes Clean', d: 'Kevin MacLeod — laid-back hip hop for play', url: 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/Backed%20Vibes%20Clean.mp3', lic: 'CC BY 4.0' },
+      { kind: 'Music', t: 'Free Music Archive — Lo-fi', d: 'more CC tracks to rotate (filter by CC BY / CC0)', url: 'https://freemusicarchive.org/genre/Lo-fi/', lic: 'CC (per track)' },
+      { kind: 'SFX', t: 'Kenney — Interface Sounds', d: 'menu clicks, confirms, back', url: 'https://kenney.nl/assets/interface-sounds', lic: 'CC0' },
+      { kind: 'SFX', t: 'Kenney — Impact Sounds', d: 'putter tick, ball-on-book thunk, cup plink', url: 'https://kenney.nl/assets/impact-sounds', lic: 'CC0' },
+      { kind: 'SFX', t: 'Freesound — “small crowd cheer”', d: 'hole-out celebration (CC0 filter applied)', url: 'https://freesound.org/search/?q=small+crowd+cheer&f=license:%22Creative+Commons+0%22', lic: 'CC0' },
+      { kind: 'Photo', t: 'Mini golf putter on turf (film)', d: 'Alex Gruber — start screen', url: 'https://unsplash.com/photos/VlOzMQl2O3s', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Living room, large window', d: 'Minh Pham — new calibration card', url: 'https://unsplash.com/photos/OtXADkUh3-I', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Pink mini golf castle', d: 'mark tulin — course pick backdrop', url: 'https://unsplash.com/photos/K4wyNTz8TrM', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Putt rolling to the hole', d: 'Waldemar Brandt — game start backdrop', url: 'https://unsplash.com/photos/TKoShf8Yu2o', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Living room with fireplace', d: 'Clay Banks — pause backdrop', url: 'https://unsplash.com/photos/f_6yPIgDxxs', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Red mini golf ball', d: 'Kayla Farmer — up-next card', url: 'https://unsplash.com/photos/qdKUa3IN0Cs', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Pendant-lit living room', d: 'Spacejoy — settings backdrop', url: 'https://unsplash.com/photos/YqFz7UMm8qE', lic: 'Unsplash' },
+      { kind: 'Photo', t: 'Blue golf ball', d: 'Aaron Burden — credits backdrop', url: 'https://unsplash.com/photos/8AplL8doB3A', lic: 'Unsplash' },
+    ];
+
+    const version = 'v0.3.0';
+    const settingsTabs = ['Display & sound', 'Game rules', 'Players', 'Camera', 'About'].map((t, i) => ({ t, bg: i === 0 ? PAPER : 'rgba(242,239,232,.06)', fg: i === 0 ? INK : PAPER }));
+    const credits = [
+      { k: 'Music', items: [{ t: 'Lobby Time', d: 'Kevin MacLeod · incompetech.com', lic: 'CC BY 4.0' }, { t: 'Backed Vibes Clean', d: 'Kevin MacLeod · incompetech.com', lic: 'CC BY 4.0' }] },
+      { k: 'Sound effects', items: [{ t: 'Interface Sounds', d: 'Kenney · kenney.nl', lic: 'CC0' }, { t: 'Impact Sounds', d: 'Kenney · kenney.nl', lic: 'CC0' }, { t: 'Small crowd cheer', d: 'Freesound community', lic: 'CC0' }] },
+      { k: 'Photography', items: [{ t: 'Alex Gruber', d: 'putter on turf', lic: 'Unsplash' }, { t: 'Minh Pham · Spacejoy · Clay Banks · Katja Rooke', d: 'living rooms', lic: 'Unsplash' }, { t: 'mark tulin · Kayla Farmer · Aaron Burden · Waldemar Brandt', d: 'mini golf', lic: 'Unsplash' }] },
+      { k: 'Open source', items: [{ t: 'OpenCV', d: 'computer vision', lic: 'Apache 2.0' }, { t: 'libfreenect / libfreenect2', d: 'Kinect drivers', lic: 'Apache 2.0 / GPL 2' }, { t: 'Outfit · Manrope', d: 'typefaces', lic: 'OFL' }] },
+    ];
+    const NEW = MINT, IMP = PAPER, FIX = WARN;
+    const changelog = [
+      { v: 'v0.3.0', date: 'Sep 12, 2026', tag: 'Latest', tagBg: MINT, tagFg: '#0f1a15', items: [
+        { k: 'new', c: NEW, t: 'Obstacles: scan the floor, confirm / delete / reshape footprints, draw missed ones; balls behind them read “hidden”, not lost.' },
+        { k: 'new', c: NEW, t: 'Xbox controller support with on-screen glyph hints; keyboard hints return when the pad disconnects.' },
+        { k: 'new', c: NEW, t: 'Settings: dark / light / auto theme, music playlist and volumes, announcer voice.' },
+        { k: 'improved', c: IMP, t: 'Long player names scroll instead of clipping in the HUD and scorecard.' },
+        { k: 'fixed', c: FIX, t: 'Ball resting against the cup no longer counted as holed on Kinect v1.' } ] },
+      { v: 'v0.2.0', date: 'Aug 30, 2026', tag: 'Courses', tagBg: 'rgba(242,239,232,.1)', tagFg: PAPER, items: [
+        { k: 'new', c: NEW, t: 'Three course templates (Hallway, Dogleg Left, Gauntlet) with drag-to-nudge obstacle outlines.' },
+        { k: 'new', c: NEW, t: 'Up to 4 players, 1–9 holes, running scorecard between holes.' },
+        { k: 'fixed', c: FIX, t: 'Out-of-bounds exit point drawn at the last in-bounds position, not the last seen one.' } ] },
+      { v: 'v0.1.0', date: 'Aug 9, 2026', tag: 'First putt', tagBg: 'rgba(242,239,232,.1)', tagFg: PAPER, items: [
+        { k: 'new', c: NEW, t: 'Floor calibration, play area, start and hole zones, two-ball tracking, one-hole game.' } ] },
+    ];
+    return { strokeCap, holeCount, H, version, settingsTabs, credits, changelog, players, playerCount: players.length, active, next, others, courses, course, nextCourse, feedObs, feedStart, feedHole, detObs, falseDet, drawPts, drawLine, detRows, hiddenBall, selObs: detObs[0], boxLabel: boxObs.label, detCount: detObs.length + 1, ballsOnFloor, ballsInPlay, trail, steps1: stepRail(1), steps2: stepRail(2), holeOpts, holeNo, nextHoleNo, holeHeads, card, leader, standings, winner, stats, pauseItems, pauseItemsRecal, recal, undo, events, inputs, assets };
+  }
+}
+</script>
+</body>
+</html>

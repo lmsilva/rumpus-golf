@@ -1,0 +1,222 @@
+{
+  "playArea": {
+    "width_m": 3,
+    "height_m": 2,
+    "note": "percent coords of play-area bbox; y grows toward camera"
+  },
+  "courses": [
+    {
+      "id": "hallway",
+      "level": "Beginner",
+      "name": "The Hallway",
+      "par": 2,
+      "start": {
+        "x": 12,
+        "y": 50,
+        "r_m": 0.15
+      },
+      "hole": {
+        "x": 88,
+        "y": 50
+      },
+      "blurb": "A straight run with one book to skirt. Teaches ball speed on your floor.",
+      "rule": "Cushion is a bumper: ricochets are legal.",
+      "obstacles": [
+        {
+          "id": "book",
+          "kind": "book",
+          "label": "Book",
+          "item": "hardback, on its edge",
+          "realSize_cm": [
+            25,
+            4
+          ],
+          "x": 47,
+          "y": 30,
+          "w": 4,
+          "h": 45
+        },
+        {
+          "id": "cushion",
+          "kind": "soft",
+          "label": "Cushion",
+          "item": "sofa cushion, top edge bumper",
+          "realSize_cm": [
+            60,
+            15
+          ],
+          "x": 30,
+          "y": 2,
+          "w": 40,
+          "h": 9
+        }
+      ]
+    },
+    {
+      "id": "dogleg",
+      "level": "Advanced",
+      "name": "Dogleg Left",
+      "par": 3,
+      "start": {
+        "x": 10,
+        "y": 82,
+        "r_m": 0.15
+      },
+      "hole": {
+        "x": 88,
+        "y": 16
+      },
+      "blurb": "Two book walls force a bank shot; a cardboard tunnel is the shortcut if you dare.",
+      "rule": "Ball through the tunnel = -1 stroke bonus.",
+      "obstacles": [
+        {
+          "id": "wallA",
+          "kind": "book",
+          "label": "Wall A",
+          "item": "2 books end to end",
+          "realSize_cm": [
+            50,
+            4
+          ],
+          "x": 33,
+          "y": 0,
+          "w": 4,
+          "h": 62
+        },
+        {
+          "id": "wallB",
+          "kind": "book",
+          "label": "Wall B",
+          "item": "1 book on its edge",
+          "realSize_cm": [
+            25,
+            4
+          ],
+          "x": 63,
+          "y": 38,
+          "w": 4,
+          "h": 62
+        },
+        {
+          "id": "tunnel",
+          "kind": "tube",
+          "label": "Tunnel",
+          "item": "paper-towel roll, cut lengthwise",
+          "realSize_cm": [
+            28,
+            6
+          ],
+          "x": 44,
+          "y": 14,
+          "w": 12,
+          "h": 8,
+          "bonus": -1
+        },
+        {
+          "id": "box",
+          "kind": "soft",
+          "label": "Box",
+          "item": "shoebox, closed",
+          "realSize_cm": [
+            32,
+            20
+          ],
+          "x": 78,
+          "y": 62,
+          "w": 14,
+          "h": 22
+        }
+      ]
+    },
+    {
+      "id": "gauntlet",
+      "level": "Expert",
+      "name": "The Gauntlet",
+      "par": 4,
+      "start": {
+        "x": 8,
+        "y": 50,
+        "r_m": 0.15
+      },
+      "hole": {
+        "x": 91,
+        "y": 50
+      },
+      "blurb": "Thread a shoebox gate, hop a book ramp, avoid the towel - it costs a stroke.",
+      "rule": "Towel is a hazard: stopping on it = +1, play on from there.",
+      "obstacles": [
+        {
+          "id": "gateN",
+          "kind": "soft",
+          "label": "Gate N",
+          "item": "shoebox",
+          "realSize_cm": [
+            32,
+            20
+          ],
+          "x": 28,
+          "y": 4,
+          "w": 9,
+          "h": 30
+        },
+        {
+          "id": "gateS",
+          "kind": "soft",
+          "label": "Gate S",
+          "item": "shoebox",
+          "realSize_cm": [
+            32,
+            20
+          ],
+          "x": 28,
+          "y": 66,
+          "w": 9,
+          "h": 30
+        },
+        {
+          "id": "ramp",
+          "kind": "ramp",
+          "label": "Ramp",
+          "item": "3 books, stepped",
+          "realSize_cm": [
+            30,
+            25
+          ],
+          "x": 52,
+          "y": 36,
+          "w": 12,
+          "h": 28
+        },
+        {
+          "id": "towel",
+          "kind": "hazard",
+          "label": "Towel",
+          "item": "hand towel, flat",
+          "realSize_cm": [
+            50,
+            30
+          ],
+          "x": 70,
+          "y": 6,
+          "w": 18,
+          "h": 30,
+          "penalty": 1
+        },
+        {
+          "id": "bumper",
+          "kind": "soft",
+          "label": "Bumper",
+          "item": "cushion",
+          "realSize_cm": [
+            60,
+            15
+          ],
+          "x": 72,
+          "y": 74,
+          "w": 24,
+          "h": 12
+        }
+      ]
+    }
+  ]
+}
