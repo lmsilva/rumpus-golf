@@ -87,17 +87,18 @@ html, body {
 /* ---- scene scaling: fixed 1920x1080 design, scaled to viewport ---- */
 #stage {
   position: absolute; inset: 0;
-  display: grid; place-items: center;
+  overflow: hidden;
   background: #0d0f12;
 }
 #scene {
-  position: relative;
+  position: absolute;
+  left: 0; top: 0;
   width: 1920px; height: 1080px;
   background: var(--ground);
   border-radius: var(--r-frame);
   overflow: hidden;
   box-shadow: var(--shadow-frame);
-  transform-origin: center center;
+  transform-origin: 0 0;
 }
 html[data-fullscreen="1"] #scene { border-radius: 0; }
 
@@ -113,7 +114,12 @@ button:focus-visible,
 [tabindex]:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+button.kb-focus,
+[tabindex].kb-focus,
+input.kb-focus,
+select.kb-focus,
+textarea.kb-focus {
   outline: 2px solid var(--mint);
   outline-offset: 2px;
 }

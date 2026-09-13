@@ -160,6 +160,7 @@ class GameEngine:
         # Settings return-state.
         self._settings_return: str = S.BOOT
         self._settings_tab = "display"     # display | rules | players | camera | about
+        self._verify_return: str = S.SENSOR_CHECK  # where Escape returns from Verify
         self._pause_focus = 0
         self._recal_flyout = False
         self._rebuilding = False
@@ -472,6 +473,8 @@ class GameEngine:
         st = self.state
         if st in (S.CAL_FLOOR,):
             self._set_state(S.SENSOR_CHECK)
+        elif st == S.VERIFY:
+            self._set_state(self._verify_return)
         elif st == S.CAL_AREA:
             self._set_state(S.CAL_FLOOR)
         elif st == S.CAL_COURSE:
@@ -500,6 +503,7 @@ class GameEngine:
             if saved is not None:
                 self.setup = saved
                 self._apply_saved_setup()
+                self._verify_return = S.BOOT
                 self._set_state(S.VERIFY)
             else:
                 self._set_state(S.SENSOR_CHECK)
@@ -515,6 +519,7 @@ class GameEngine:
             if saved is not None:
                 self.setup = saved
                 self._apply_saved_setup()
+                self._verify_return = S.SENSOR_CHECK
                 self._set_state(S.VERIFY)
         elif action == "fresh" or action == "new_game":
             self.setup = Setup()

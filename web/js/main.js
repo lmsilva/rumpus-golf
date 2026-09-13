@@ -162,18 +162,25 @@ window.RG = window.RG || {};
       return r.width > 0 && r.height > 0;
     });
   }
+  function markFocus(el) {
+    // A visible focus ring independent of :focus-visible heuristics (which
+    // don't fire reliably for programmatic .focus()).
+    scene.querySelectorAll(".kb-focus").forEach((n) => n.classList.remove("kb-focus"));
+    if (el) el.classList.add("kb-focus");
+  }
   function moveFocus(delta) {
     const els = focusables();
     if (!els.length) return;
     const idx = els.indexOf(document.activeElement);
     const next = idx < 0 ? (delta > 0 ? 0 : els.length - 1) : (idx + delta + els.length) % els.length;
     els[next].focus({ preventScroll: true });
+    markFocus(els[next]);
     try { els[next].scrollIntoView({ block: "nearest" }); } catch (err) {}
   }
   function focusFirst() {
     const els = focusables();
     const first = els.find((el) => el.tagName === "BUTTON");
-    if (first) first.focus({ preventScroll: true });
+    if (first) { first.focus({ preventScroll: true }); markFocus(first); }
   }
   function scrollPane(dir) {
     const ae = document.activeElement;
@@ -228,7 +235,9 @@ window.RG = window.RG || {};
   // ---- scene scaling ----
   function fit() {
     const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-    scene.style.transform = `scale(${s})`;
+    const x = (window.innerWidth - 1920 * s) / 2;
+    const y = (window.innerHeight - 1080 * s) / 2;
+    scene.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
   }
   window.addEventListener("resize", fit);
   fit();
