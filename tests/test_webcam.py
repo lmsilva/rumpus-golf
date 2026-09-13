@@ -216,6 +216,59 @@ def test_kinect_absent_from_usb_names_the_power_adapter():
     assert "12 V" in report.get("reason", "")
 
 
+def test_doctor_blames_power_when_only_the_motor_enumerates():
+    """Motor but no camera is the signature of a Kinect v1 on bus power."""
+    from unittest.mock import patch
+
+    from rumpus.sensor import kinect_doctor as kd
+
+    motor = {"vid": 0x045E, "pid": 0x02B0, "status": "Error",
+             "name": "Xbox NUI Motor", "problem": 28}
+    with patch.object(kd.detect, "detect_sensor", return_value="v1"), \
+         patch.object(kd.detect, "list_usb", return_value=[(0x045E, 0x02B0)]), \
+         patch.object(kd, "_windows_devices", return_value=[motor]), \
+         patch.object(kd.platform, "system", return_value="Windows"):
+        text = "\n".join(kd.report())
+    assert "Xbox NUI Camera" in text and "absent" in text
+    assert "12 V power adapter" in text
+    # The driver state it did find should be spelled out, not left as a number.
+    assert "no driver installed" in text
+
+
+def test_doctor_blames_the_binding_when_the_hardware_is_healthy():
+    """A healthy sensor with no Python binding needs a different fix."""
+    from unittest.mock import patch
+
+    from rumpus.sensor import kinect_doctor as kd
+
+    devs = [
+        {"vid": 0x045E, "pid": 0x02B0, "status": "OK",
+         "name": "Xbox NUI Motor", "problem": 0},
+        {"vid": 0x045E, "pid": 0x02AE, "status": "OK",
+         "name": "Xbox NUI Camera", "problem": 0},
+    ]
+    with patch.object(kd.detect, "detect_sensor", return_value="v1"), \
+         patch.object(kd.detect, "list_usb",
+                      return_value=[(0x045E, 0x02B0), (0x045E, 0x02AE)]), \
+         patch.object(kd, "_windows_devices", return_value=devs), \
+         patch.object(kd, "_binding", return_value=("freenect", False, "nope")), \
+         patch.object(kd.platform, "system", return_value="Windows"):
+        text = "\n".join(kd.report())
+    assert "12 V power adapter" not in text
+    assert "freenect" in text and "not installed" in text
+
+
+def test_doctor_says_no_device_without_guessing():
+    from unittest.mock import patch
+
+    from rumpus.sensor import kinect_doctor as kd
+
+    with patch.object(kd.detect, "detect_sensor", return_value=None), \
+         patch.object(kd.detect, "list_usb", return_value=[(0x1234, 0x5678)]):
+        text = "\n".join(kd.report())
+    assert "No Kinect on the USB bus" in text
+
+
 if __name__ == "__main__":
     test_frame_has_picture_rejects_black()
     test_fourcc_name_roundtrip()
@@ -231,4 +284,7 @@ if __name__ == "__main__":
     test_base_backend_driver_settings_is_noop()
     test_unusable_kinect_explains_itself_and_falls_back_to_the_webcam()
     test_kinect_absent_from_usb_names_the_power_adapter()
+    test_doctor_blames_power_when_only_the_motor_enumerates()
+    test_doctor_blames_the_binding_when_the_hardware_is_healthy()
+    test_doctor_says_no_device_without_guessing()
     print("ok")
