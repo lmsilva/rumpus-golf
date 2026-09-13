@@ -60,6 +60,9 @@ def create_backend(
         b = WebcamBackend(camera_index, camera_res)
         if b.open():
             return b, "webcam"
+        # The user asked for a webcam — do not silently substitute the mock.
+        if backend_mode == "webcam":
+            return None, "none"
 
     if allow_mock:
         b = MockBackend()

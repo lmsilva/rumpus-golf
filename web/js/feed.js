@@ -1,24 +1,24 @@
 // Camera feed rendering + overlay SVG + pointer capture.
-// The feed is a full-bleed <canvas>; the overlay is an <svg> on top. Shapes are
-// in normalized (0..1) coordinates and are scaled to the element on resize.
+// The feed canvas lives outside screen HTML so it survives innerHTML rebuilds.
+// Screens may host it full-bleed on #scene or dock it into [data-feed-slot].
 window.RG = window.RG || {};
 
 (function () {
   let wrap = null, canvas = null, ctx = null, svg = null;
   let pointerDown = false;
   let lastShapes = [];
+  let wired = false;
 
   function ensure() {
-    const scene = document.getElementById("scene");
     if (wrap) return;
     wrap = document.createElement("div");
     wrap.className = "feed-wrap hidden";
     wrap.innerHTML = `<canvas class="feed"></canvas><svg class="overlay" xmlns="http://www.w3.org/2000/svg"></svg>`;
-    scene.appendChild(wrap);
     canvas = wrap.querySelector("canvas");
     svg = wrap.querySelector("svg");
     ctx = canvas.getContext("2d");
-
+    if (wired) return;
+    wired = true;
     const norm = (e) => {
       const r = wrap.getBoundingClientRect();
       return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
@@ -33,40 +33,72 @@ window.RG = window.RG || {};
     wrap.addEventListener("pointercancel", () => { pointerDown = false; });
   }
 
+  function mount(slot) {
+    ensure();
+    const scene = document.getElementById("scene");
+    const parent = slot || scene;
+    if (!parent) return;
+    if (wrap.parentNode !== parent) parent.insertBefore(wrap, parent.firstChild);
+    wrap.classList.toggle("slotted", !!slot);
+    const interactive = !slot || slot.hasAttribute("data-feed-interactive");
+    wrap.classList.toggle("interactive", interactive);
+  }
+
   function size() {
+    if (!wrap || !wrap.isConnected) return;
     const r = wrap.getBoundingClientRect();
-    canvas.width = r.width; canvas.height = r.height;
-    svg.setAttribute("viewBox", `0 0 1 1`);
-    svg.setAttribute("width", r.width);
-    svg.setAttribute("height", r.height);
+    const w = Math.max(1, Math.round(r.width));
+    const h = Math.max(1, Math.round(r.height));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    svg.setAttribute("viewBox", "0 0 1 1");
+    svg.setAttribute("width", String(w));
+    svg.setAttribute("height", String(h));
   }
 
   RG.feed = {
-    show(v) {
+    show(v, slot) {
       ensure();
-      wrap.classList.toggle("hidden", !v);
-      if (v) size();
+      if (!v) {
+        wrap.classList.add("hidden");
+        return;
+      }
+      mount(slot || null);
+      wrap.classList.remove("hidden");
+      requestAnimationFrame(size);
     },
     draw(bytes) {
-      ensure();
-      if (canvas.classList.contains("hidden") || !wrap) return;
-      if (!bytes) { canvas.style.display = "none"; return; }
-      canvas.style.display = "block";
+      if (!wrap || !wrap.isConnected || wrap.classList.contains("hidden") || !ctx) return;
+      if (!bytes) return;
+      const blob = new Blob([bytes], { type: "image/jpeg" });
       if ("createImageBitmap" in window) {
-        createImageBitmap(new Blob([bytes], { type: "image/jpeg" }))
-          .then((bmp) => { if (bmp.width !== canvas.width) size(); ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height); bmp.close(); })
+        createImageBitmap(blob)
+          .then((bmp) => {
+            if (!wrap.isConnected || wrap.classList.contains("hidden")) { bmp.close(); return; }
+            size();
+            ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+            bmp.close();
+          })
           .catch(() => {});
       } else {
         const img = new Image();
-        const url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
-        img.onload = () => { if (img.width !== canvas.width) size(); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); URL.revokeObjectURL(url); };
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+          if (wrap.isConnected && !wrap.classList.contains("hidden")) {
+            size();
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          }
+          URL.revokeObjectURL(url);
+        };
         img.src = url;
       }
     },
     overlay(shapes) {
       ensure();
       lastShapes = shapes || [];
-      renderSvg(lastShapes);
+      if (svg) renderSvg(lastShapes);
     },
     shapes() { return lastShapes; },
   };
@@ -92,7 +124,7 @@ window.RG = window.RG || {};
           "stroke-linejoin": "round",
         });
         svg.appendChild(p);
-        if (s.label) addLabel(s.pts && s.pts[0], s.label, s.stroke || "#fff", "poly");
+        if (s.label) addLabel(s.pts && s.pts[0], s.label, s.stroke || "#fff");
       } else if (s.type === "circle") {
         const c = svgEl("circle", {
           cx: s.x, cy: s.y, r: s.r,
@@ -102,12 +134,12 @@ window.RG = window.RG || {};
           "stroke-dasharray": s.dash || "",
         });
         svg.appendChild(c);
-        if (s.label) addLabel([s.x, s.y], s.label, s.stroke || "#fff", "circle");
+        if (s.label) addLabel([s.x, s.y], s.label, s.stroke || "#fff");
       }
     }
   }
 
-  function addLabel(pos, text, color, kind) {
+  function addLabel(pos, text, color) {
     const t = svgEl("text", {
       x: pos[0], y: Math.max(0.02, pos[1] - 0.02),
       "font-family": "Outfit, sans-serif", "font-size": "0.018",

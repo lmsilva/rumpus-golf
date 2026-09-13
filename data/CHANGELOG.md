@@ -1,6 +1,15 @@
 # Changelog
 Rendered on the "What's new" screen (S21). Newest first. Line prefixes: `new:`, `improved:`, `fixed:`. If this file has no releases, hide the "What's new" entry in Settings.
 
+## v0.4.1 — 2026-09-12 · Latest
+- fixed: Settings Camera tab stayed on the mock sensor after picking a real webcam — the startup scan was locking DirectShow devices so the C920 open failed and fell back to mock.
+- improved: Settings layout matches the design (rail / 860 px cards / theme preview at left 1288). Apply camera applies the selected device without leaving the page.
+- improved: Camera picker lists each device by its Windows driver name (HD Pro Webcam C920, Iriun Webcam, OBS Virtual Camera, …) instead of Camera 0/1/2.
+- improved: Light / dark / auto theme now applies immediately and restyles glass, scrims and the letterbox.
+- improved: Keyboard navigation is spatial (arrows move to the nearest control) and keeps a visible mint focus ring; Esc/Back works on every screen that shows it.
+- new: Favicon (mint cup + player dots).
+- fixed: Settings screen did not rebuild after a theme or volume change, so the selected option looked stuck.
+
 ## v0.4.0 — 2026-09-12 · Latest
 - new: Regular 2D webcam support — no Kinect required. The floor is mapped with a 4-corner homography instead of a depth plane.
 - new: Color-only tracking — balls by hue mask, obstacles and the cup by frame differencing against an empty-floor reference.

@@ -25,11 +25,8 @@ from .paths import WEB_DIR
 from .sensor import create_backend
 from .vision.geometry import default_camera
 
-# States whose snapshot includes a live camera feed.
-FEED_PUBLISH_STATES = {
-    "VERIFY", "CAL_FLOOR", "CAL_AREA", "CAL_PLACE", "CAL_OBSTACLES",
-    "CAL_CUP", "CAL_BALLS", "PLAY", "TURN_CHANGE", "HOLE_OUT", "OOB", "HOLE_START",
-}
+# The browser decides which screens show the picture. Always encode when we
+# have a color frame so Settings / sensor-check can show a live preview.
 
 
 class Broadcaster:
@@ -65,8 +62,10 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
         idx = camera_index if camera_index is not None else int(cfg.get("device", 0))
         res = camera_res if camera_res is not None else str(cfg.get("resolution", "1280x720"))
         mode = backend_mode if backend_mode is not None else str(cfg.get("backend", "auto"))
+        # An explicit webcam preference must not silently fall back to mock.
+        use_mock = allow_mock and mode != "webcam" and force_sensor != "webcam"
         backend, _kind = create_backend(
-            force=force_sensor, allow_mock=allow_mock,
+            force=force_sensor, allow_mock=use_mock,
             camera_index=idx, camera_res=res, backend_mode=mode,
         )
         if backend is None:
@@ -92,10 +91,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                     engine.handle_input(input_queue.get_nowait())
                 except queue.Empty:
                     break
-            if engine.state in FEED_PUBLISH_STATES:
-                jpeg = engine.encode_frame()
-            else:
-                jpeg = None
+            jpeg = engine.encode_frame()
             broadcaster.publish(engine.snapshot(), jpeg)
             time.sleep(interval)
 

@@ -102,10 +102,13 @@ class GameEngine:
         self._avg_color_count: float = 0.0
         self._preset_w = 3.0
         self._preset_h = 2.0
+        self._preset_name = "medium"
 
-        # Camera enumeration (for the Settings → Camera tab).
+        # Camera enumeration (for the Settings → Camera tab). Names-only so we
+        # never open a device while the live backend holds it.
         self._camera_list: list[dict] = []
         self._camera_scan_done = False
+        self._camera_error = ""
         threading.Thread(target=self._scan_cameras, daemon=True).start()
 
         # Game round state.
@@ -182,6 +185,8 @@ class GameEngine:
         self._feed_w = backend.description.color_res[0]
         self._feed_h = backend.description.color_res[1]
         self.sensor_status = backend.description.model
+        self._camera_error = ""
+        self._camera_error = ""
 
     @property
     def is_mock(self) -> bool:
@@ -195,6 +200,8 @@ class GameEngine:
     def _scan_cameras(self) -> None:
         try:
             from .sensor.detect import list_webcams
+            from .sensor.devices import list_capture_names
+            list_capture_names(refresh=True)
             self._camera_list = list_webcams()
         except Exception:
             self._camera_list = []
@@ -215,8 +222,12 @@ class GameEngine:
         except Exception:
             return None
 
-    def _reconfigure_camera(self) -> None:
-        """Close the current backend and reopen per the persisted camera settings."""
+    def _reconfigure_camera(self) -> bool:
+        """Close the current backend and reopen per the persisted camera settings.
+
+        Stays on the current screen (Settings) so the Sensor card can show the
+        new device. Returns True when a real backend is attached.
+        """
         from .sensor import create_backend
         cfg = self.settings.get("camera", default={}) or {}
         mode = str(cfg.get("backend", "auto"))
@@ -228,6 +239,7 @@ class GameEngine:
                 self.backend.close()
             except Exception:
                 pass
+            self.backend = None
 
         # Never fall back to the mock during an explicit Settings change.
         backend, _kind = create_backend(
@@ -242,18 +254,20 @@ class GameEngine:
         self._draw_poly = []
 
         if backend is None:
-            self.backend = None
             self.sensor_status = "none"
             self.sensor_desc = None
-        else:
-            cam = getattr(backend, "cam", None) or default_camera(
-                backend.description.depth_res if backend.description.depth_res != (0, 0)
-                else backend.description.color_res
+            self._camera_error = (
+                "Could not open that camera. Close Zoom / Teams / Iriun if it "
+                "has the device, then click Apply camera."
             )
-            self.attach_backend(backend, cam)
-            self.sensor_status = backend.description.model
-        self.setup = Setup()
-        self._set_state(S.SENSOR_CHECK)
+            return False
+        cam = getattr(backend, "cam", None) or default_camera(
+            backend.description.depth_res if backend.description.depth_res != (0, 0)
+            else backend.description.color_res
+        )
+        self.attach_backend(backend, cam)
+        self._camera_error = ""
+        return True
 
     # ===================================================================== #
     # Main loop
@@ -439,7 +453,7 @@ class GameEngine:
         elif st in (S.CAL_PLACE, S.HOLE_START):
             self._place_action(action)
         elif st == S.CAL_OBSTACLES:
-            self._obstacles_action(action)
+            self._obstacles_action(action, msg)
         elif st == S.CAL_CUP:
             self._cup_action(action)
         elif st == S.CAL_BALLS:
@@ -591,6 +605,7 @@ class GameEngine:
         sizes = {"small": (2.0, 1.5), "medium": (3.0, 2.0), "large": (4.0, 2.5)}
         w, h = sizes.get(name, (3.0, 2.0))
         self._preset_w, self._preset_h = w, h
+        self._preset_name = name if name in sizes else "medium"
         self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
         self.setup.start = CircleZone(0.0, 0.0, 0.15)
         self._draw_poly = []
@@ -683,11 +698,17 @@ class GameEngine:
                 return g["label"]
         return None
 
-    def _obstacles_action(self, action: str) -> None:
+    def _obstacles_action(self, action: str, msg: dict | None = None) -> None:
         if action == "confirm":
             pending = [o for o in self.setup.obstacles if o.state in ("proposed", "drawing")]
             if not pending:
                 self._obstacles_done()
+        elif action == "confirm_one":
+            if self._selected_obstacle is not None:
+                o = self.setup.obstacles[self._selected_obstacle]
+                if o.state in ("proposed", "drawing"):
+                    o.state = "confirmed"
+                self._selected_obstacle = None
         elif action == "confirm_all":
             flagged = [o for o in self.setup.obstacles if o.state == "proposed" and o.confidence < 0.7]
             if not flagged:
@@ -714,7 +735,9 @@ class GameEngine:
                 if self.setup.obstacles and self.setup.obstacles[-1].state == "drawing":
                     self.setup.obstacles.pop()
         elif action == "select":
-            pass  # selection via pointer
+            idx = (msg or {}).get("index")
+            if idx is not None and 0 <= int(idx) < len(self.setup.obstacles):
+                self._selected_obstacle = int(idx)
 
     def _obstacles_done(self) -> None:
         # After the course/obstacles are confirmed: resume play on a rebuild
@@ -866,6 +889,8 @@ class GameEngine:
             self._set_state(S.CHANGELOG)
         elif action == "refresh_cameras":
             self.rescan_cameras()
+        elif action == "apply_camera":
+            self._reconfigure_camera()
 
     def _holecomplete_action(self, action: str) -> None:
         if action == "confirm":
@@ -1384,7 +1409,10 @@ class GameEngine:
     # ===================================================================== #
     def snapshot(self) -> dict[str, Any]:
         return {
-            "screen": SCREEN_BY_STATE.get(self.state, "S01"),
+            "screen": (
+                "S07c" if self.state == S.CAL_OBSTACLES and self._selected_obstacle is not None
+                else SCREEN_BY_STATE.get(self.state, "S01")
+            ),
             "state": self.state,
             "version": __version__,
             "input_mode": "keyboard",
@@ -1439,19 +1467,23 @@ class GameEngine:
     def _ui_snapshot(self) -> dict:
         st = self.state
         if st == S.BOOT:
-            saved = Setup.load()
+            meta, when = self._saved_setup_meta()
             return {"menu": [("New game", "A"), ("Load last setup", "A"), ("Course library", None), ("Settings", None)],
-                    "saved_meta": "Living room · 3 courses" if saved else None}
+                    "saved_meta": meta, "saved_when": when}
         if st == S.SENSOR_CHECK:
-            return {"sensor": self.sensor_desc}
+            meta, when = self._saved_setup_meta()
+            return {"sensor": self.sensor_desc, "saved_meta": meta, "saved_when": when}
         if st == S.VERIFY:
             return {}
         if st == S.CAL_FLOOR:
             return {"step": 1}
         if st == S.CAL_AREA:
-            return {"step": 2, "presets": ["small", "medium", "large"]}
+            return {"step": 2, "presets": ["small", "medium", "large"],
+                    "preset": self._preset_name}
         if st == S.CAL_COURSE:
-            return {"courses": self._courses_snapshot(), "step": 3}
+            aw, ah = self._play_area_size()
+            return {"courses": self._courses_snapshot(), "step": 3,
+                    "area_w": aw, "area_h": ah}
         if st in (S.CAL_PLACE, S.HOLE_START):
             return {"step": 3, "ghosts": self._ghosts_snapshot(), "course": course_by_id(self.current_course_id)}
         if st == S.CAL_OBSTACLES:
@@ -1488,6 +1520,37 @@ class GameEngine:
             return {"changelog": self._changelog()}
         return {}
 
+    def _play_area_size(self) -> tuple[float, float]:
+        if self.setup.play_area:
+            xs = [p[0] for p in self.setup.play_area]
+            ys = [p[1] for p in self.setup.play_area]
+            return round(max(xs) - min(xs), 1), round(max(ys) - min(ys), 1)
+        return round(self._preset_w, 1), round(self._preset_h, 1)
+
+    def _saved_setup_meta(self) -> tuple[str | None, str]:
+        saved = Setup.load()
+        if saved is None:
+            return None, ""
+        n_courses = len(saved.courses) or 3
+        n_balls = len(saved.players)
+        aw, ah = None, None
+        if saved.play_area:
+            xs = [p[0] for p in saved.play_area]
+            ys = [p[1] for p in saved.play_area]
+            aw, ah = round(max(xs) - min(xs), 1), round(max(ys) - min(ys), 1)
+        parts = [saved.name]
+        if aw is not None:
+            parts.append(f"{aw} × {ah} m")
+        parts.append(f"{n_courses} courses")
+        if n_balls:
+            parts.append(f"{n_balls} balls")
+        line = " · ".join(parts)
+        when = ""
+        if saved.saved_at:
+            dt = time.localtime(saved.saved_at)
+            when = f"saved {time.strftime('%b', dt)} {dt.tm_mday}, {time.strftime('%H:%M', dt)}"
+        return line, when
+
     def _camera_snapshot(self) -> dict:
         cfg = self.settings.get("camera", default={}) or {}
         return {
@@ -1497,7 +1560,9 @@ class GameEngine:
             "resolution": str(cfg.get("resolution", "1280x720")),
             "backend": str(cfg.get("backend", "auto")),
             "is_color_only": self.is_color_only,
+            "is_mock": self.is_mock,
             "sensor_status": self.sensor_status,
+            "error": self._camera_error,
         }
 
     # -- sub-snapshots ---------------------------------------------------- #
@@ -1518,7 +1583,7 @@ class GameEngine:
         for g in self.layout.ghost_polygons():
             ghosts.append({"label": g["label"], "item": g["item"],
                            "polygon": g["polygon"], "real_size_cm": g["real_size_cm"],
-                           "kind": g["kind"]})
+                           "kind": g["kind"], "seen": False})
         return ghosts
 
     def _mock_ball_snapshot(self) -> list[dict]:

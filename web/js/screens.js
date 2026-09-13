@@ -8,11 +8,18 @@ function dot(color, size = 16) {
   return `<span class="dot" style="width:${size}px;height:${size}px;background:${color}"></span>`;
 }
 function topbar(subtitle, opts = {}) {
+  const right = [RG.badge()];
+  if (opts.browse) {
+    right.push(`<span class="hint">${RG.glyph("prev")}${RG.glyph("next")}<span>Browse</span></span>`);
+  }
+  if (opts.back !== false) {
+    right.push(`<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button>`);
+  }
   return `<div class="topbar">
     <span class="brand">Rumpus Golf</span>
-    ${subtitle ? `<span class="subtitle">${esc(subtitle)}</span>` : ""}
     ${opts.rail || ""}
-    <span class="right">${RG.badge()}${opts.back !== false ? `<span class="hint">${RG.glyph("back")}<span>Back</span></span>` : ""}</span>
+    ${!opts.rail && subtitle ? `<span class="subtitle">${esc(subtitle)}</span>` : ""}
+    <span class="right">${right.join("")}</span>
   </div>`;
 }
 function stepRail(current) {
@@ -22,11 +29,23 @@ function stepRail(current) {
     return `<span class="step ${cls}"><span class="n">${i < current - 1 ? "✓" : i + 1}</span>${s}</span>`;
   }).join("")}</span>`;
 }
-function photo(name, filter, scrim, credit) {
+function photo(name, filter, scrim, opts = {}) {
   const bg = `linear-gradient(160deg, #2a2e36 0%, #1a1c22 60%, #14161a 100%)`;
-  return `<div class="photo" style="background-image:url('/assets/photos/${name}.jpg'),${bg};background-blend-mode:normal;filter:${filter || "none"}">
+  const place = opts.right ? `inset:0 0 0 auto;width:${opts.right}px;` : "";
+  const op = opts.opacity != null ? `opacity:${opts.opacity};` : "";
+  return `<div class="photo-layer">
+    <div class="photo" style="background-image:url('/assets/photos/${name}.jpg'),${bg};background-blend-mode:normal;filter:${filter || "none"};${place}${op}"></div>
     <div class="scrim" style="background:${scrim || "transparent"}"></div>
   </div>`;
+}
+function livePill(st, compact) {
+  const w = (st.feed && st.feed.w) || 0;
+  const h = (st.feed && st.feed.h) || 0;
+  return `<span class="pill live-pill">${compact ? "LIVE" : `LIVE · ${w} × ${h} · 30 fps`}</span>`;
+}
+function hasDepth(st) {
+  const d = (st.sensor && st.sensor.depth_res) || (st.ui && st.ui.sensor && st.ui.sensor.depth_res);
+  return !!(d && d[0]);
 }
 function marquee(text) {
   return `<span class="marquee" data-marquee><span>${esc(text)}</span></span>`;
@@ -37,7 +56,6 @@ const S = {};
 
 S.S01 = function (st) {
   const ui = st.ui || {};
-  const menu = ui.menu || [];
   const items = [
     { label: "New game", action: "new_game", cls: "primary", verb: "confirm" },
     { label: "Load last setup", action: "load", cls: "secondary", verb: "confirm", meta: ui.saved_meta || "" },
@@ -45,22 +63,22 @@ S.S01 = function (st) {
     { label: "Settings", action: "settings", cls: "secondary", verb: "confirm" },
   ];
   return `
-  ${photo("s01", "saturate(.75) brightness(.8)", "linear-gradient(90deg,#15171c 0 780px,rgba(21,23,28,.85) 980px,rgba(21,23,28,.15) 1500px)")}
+  ${photo("s01", "saturate(.75) brightness(.8)", "linear-gradient(90deg,var(--ground) 0 780px,rgba(var(--ground-rgb),.85) 980px,rgba(var(--ground-rgb),.15) 1500px)", { right: 1040 })}
   <div style="position:absolute;inset:0;padding:72px 96px;display:flex;flex-direction:column">
     <div class="row" style="gap:12px">
       ${dot("#ff8a3d", 28)}${dot("#ff5fa8", 28)}${dot("#5b8cff", 28)}${dot("#ffd84d", 28)}
-      <span style="margin-left:auto">${RG.badge()}</span>
+      <span style="margin-left:auto">${RG.badge(true)}</span>
     </div>
     <div style="margin-top:auto">
       <h1 style="font:800 200px/1 var(--font-display);letter-spacing:-.05em">Rumpus<br>Golf</h1>
       <div style="font:400 32px/1.3 var(--font-body);color:var(--text-muted);margin-top:28px;max-width:720px">Turn any floor into a mini golf course.</div>
     </div>
     <div class="col" style="margin-top:56px;max-width:560px;gap:12px">
-      ${items.map((it) => `<button class="btn ${it.cls}" data-action="${it.action}"><span>${esc(it.label)}</span>${it.meta ? `<span class="meta">${esc(it.meta)}</span>` : ""}${it.verb ? RG.btnHint(it.verb) : ""}</button>`).join("")}
+      ${items.map((it) => `<button class="btn ${it.cls} stretch" data-action="${it.action}"><span>${esc(it.label)}</span>${it.meta ? `<span class="meta">${esc(it.meta)}</span>` : ""}${it.verb ? RG.btnHint(it.verb) : ""}</button>`).join("")}
     </div>
   </div>
-  <div class="pill" style="position:absolute;right:56px;bottom:48px">
-    <span class="dot" style="background:var(--mint)"></span>${esc((st.sensor && st.sensor.model) || "Kinect v1")} connected
+  <div class="pill" style="position:absolute;right:56px;bottom:48px;padding:14px 20px;font:600 17px var(--font-body)">
+    <span class="dot" style="background:var(--mint);width:10px;height:10px"></span>${esc((st.sensor && st.sensor.model) || "Kinect v1")} connected
     <span class="text-muted">· Lobby Time — Kevin MacLeod</span>
   </div>`;
 };
@@ -70,46 +88,41 @@ S.S02 = function (st) {
   const facts = d ? [
     ["Depth", `${d.depth_res[0]} × ${d.depth_res[1]}`],
     ["Color", `${d.color_res[0]} × ${d.color_res[1]}`],
-    ["Field of view", `${d.fov_h_deg}°`],
+    ["Field of view", `${d.fov_h_deg}° horizontal`],
     ["Reliable range", `${d.reliable_min_m} – ${d.reliable_max_m} m`],
     ["Note", d.note || ""],
   ] : [];
   const noSensor = !d;
   return `
   ${topbar("New game")}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px;height:calc(100% - 96px)">
     <div class="card" style="padding:56px 64px;display:flex;flex-direction:column">
       <div class="kicker mint">Sensor</div>
-      ${noSensor
-        ? `<div style="margin-top:14px"><h2 style="font-size:80px">No camera<br>found.</h2></div>`
-        : `<h2 style="font-size:80px;line-height:1;margin:14px 0 36px">${esc(d.model)}<br>found.</h2>`}
-      ${noSensor
-        ? `<div style="margin-top:auto;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.4);border-radius:18px;padding:24px 28px;display:flex;gap:18px">
-             <span class="dot" style="background:var(--coral);margin-top:8px"></span>
-             <div><div style="font:700 22px var(--font-display)">Error state — no sensor</div>
-             <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:4px">No camera found. Plug in a Kinect v1 or v2 and press Retry. Nothing else is reachable until a sensor answers.</div>
-             <button class="btn primary sm" style="margin-top:16px" data-action="retry"><span>Retry</span></button></div>
-           </div>`
-        : `<div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 var(--font-body)">
+      <h2 style="font-size:80px;letter-spacing:-.035em;margin:14px 0 36px">${noSensor ? "No camera" : esc(d.model)}<br>found.</h2>
+      ${noSensor ? "" : `<div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 var(--font-body)">
              ${facts.map(([k, v]) => `<span class="text-muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}
            </div>`}
+      ${noSensor ? `<div style="margin-top:auto;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.4);border-radius:18px;padding:24px 28px;display:flex;gap:18px">
+             <span class="dot" style="width:12px;height:12px;background:var(--coral);margin-top:10px"></span>
+             <div><div style="font:700 22px var(--font-display)">Error state — no sensor</div>
+             <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:4px">No camera found. Plug in a Kinect v1 or v2 and press Retry. Nothing else is reachable until a sensor answers.</div>
+             <button class="btn primary sm" style="margin-top:16px" data-action="retry"><span>Retry</span>${RG.btnHint("confirm")}</button></div>
+           </div>` : ""}
     </div>
-    <div class="col" style="gap:20px">
-      <div style="background:var(--mint);color:var(--mint-text);border-radius:24px;padding:40px 44px;flex:1;display:flex;flex-direction:column">
-        <div style="font:800 40px var(--font-display)">Load saved setup</div>
-        <div style="font:400 21px/1.45 var(--font-body);margin-top:8px;opacity:.8">Living room · 3 courses · 4 balls<br>saved recently</div>
-        <span style="margin-top:auto;display:inline-flex;align-items:center;gap:8px;font:600 16px var(--font-body)">
-          <button class="btn primary" data-action="load"><span>Load</span>${RG.btnHint("confirm")}</button>
-        </span>
-      </div>
-      <div style="position:relative;overflow:hidden;border-radius:24px;flex:1;display:flex;flex-direction:column">
-        ${photo("s02", "saturate(.7)", "linear-gradient(90deg,rgba(21,23,28,.92) 0%,rgba(21,23,28,.75) 55%,rgba(21,23,28,.35) 100%)")}
-        <div style="position:relative;padding:40px 44px;flex:1;display:flex;flex-direction:column">
-          <div style="font:800 40px var(--font-display)">New calibration</div>
+    <div class="col" style="gap:20px;min-height:0">
+      <button type="button" class="action-card" data-action="load">
+        <div style="font:800 40px var(--font-display);letter-spacing:-.02em">Load saved setup</div>
+        <div style="font:400 21px/1.45 var(--font-body);margin-top:8px;opacity:.8">${esc((st.ui && st.ui.saved_meta) || "No saved setup yet")}<br>${esc((st.ui && st.ui.saved_when) || "")}</div>
+        <span class="hint-row">${RG.glyph("confirm")}Load</span>
+      </button>
+      <button type="button" class="action-card photo-card" data-action="fresh">
+        ${photo("s02", "saturate(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.92) 0%,rgba(var(--ground-rgb),.75) 55%,rgba(var(--ground-rgb),.35) 100%)")}
+        <div class="action-card-body">
+          <div style="font:800 40px var(--font-display);letter-spacing:-.02em">New calibration</div>
           <div style="font:400 21px/1.45 var(--font-body);margin-top:8px;color:var(--text-soft)">Five steps, about 3 minutes. Clear the floor first.</div>
-          <span style="margin-top:auto"><button class="btn secondary" data-action="fresh"><span>Start fresh</span>${RG.btnHint("secondary")}</button></span>
+          <span class="hint-row" style="color:var(--text-muted)">${RG.glyph("secondary")}Start fresh</span>
         </div>
-      </div>
+      </button>
     </div>
   </div>`;
 };
@@ -119,80 +132,94 @@ S.S03 = function (st) {
   return `
   <div class="glass" style="position:absolute;left:56px;top:56px;max-width:900px;border-radius:24px;padding:32px 40px;z-index:3">
     <div class="kicker mint">Verify · ${esc(setup.name || "Living room")}</div>
-    <h2 style="font-size:60px;line-height:1;margin:10px 0 16px">Do the lines still sit on the floor?</h2>
+    <h2 style="font-size:60px;margin:10px 0 16px">Do the lines still sit on the floor?</h2>
     <div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">White = play area, start and the obstacles you confirmed. Mint = hole. If only something moved, Recalibrate lets you redo just that — cup, obstacles or zones.</div>
   </div>
-  <div class="pill" style="position:absolute;right:56px;top:56px;z-index:3">LIVE · ${st.feed.w} × ${st.feed.h} · 30 fps</div>
+  <div class="pill" style="position:absolute;right:56px;top:56px;z-index:3">LIVE · ${(st.feed && st.feed.w) || 0} × ${(st.feed && st.feed.h) || 0} · 30 fps</div>
   <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
     <button class="btn primary" data-action="confirm" style="min-width:400px"><span>Looks right</span>${RG.btnHint("confirm")}</button>
-    <button class="btn glass" data-action="recalibrate"><span>Recalibrate</span>${RG.btnHint("undo")}</button>
+    <button class="btn glass" data-action="recalibrate" style="min-width:400px"><span>Recalibrate</span>${RG.btnHint("undo")}</button>
   </div>`;
 };
 
 S.S04 = function (st) {
+  const depth = hasDepth(st);
+  const helper = depth
+    ? "Averages 2 s of depth frames, then fits the floor plane. A mint progress line runs along the top of the feed."
+    : "Captures a color reference of the empty floor. A mint progress line runs along the top of the feed.";
   return `
-  ${topbar("Step 1 of 5 · Floor", { rail: stepRail(1) })}
+  ${topbar("", { rail: stepRail(1), back: false })}
   <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
-    <div style="position:relative;background:#242629;border-radius:24px;overflow:hidden">
-      <div style="position:absolute;top:0;left:0;right:0;height:230px;background:rgba(13,15,18,.6);z-index:2"></div>
-      <div style="position:absolute;bottom:0;left:0;right:0;height:80px;background:rgba(13,15,18,.6);z-index:2"></div>
-      <div style="position:absolute;top:230px;left:0;right:0;height:3px;background:var(--mint);z-index:3"></div>
-      <div style="position:absolute;bottom:80px;left:0;right:0;height:3px;background:var(--mint);z-index:3"></div>
-      <div style="position:absolute;top:120px;left:32px;z-index:3;font:600 30px var(--font-body)">4.0 m — too far…</div>
-      <div style="position:absolute;bottom:20px;left:32px;z-index:3;font:600 30px var(--font-body)">0.8 m — too close</div>
-      <div style="position:absolute;top:290px;left:32px;z-index:3;font:700 30px var(--font-display);color:var(--mint)">Good floor — fit a course inside this band</div>
+    <div class="feed-slot" data-feed-slot style="border-radius:24px">
+      <div class="feed-band" style="top:0;height:21.3%"></div>
+      <div class="feed-band" style="bottom:0;height:7.4%"></div>
+      <div class="feed-band-line" style="top:21.3%"></div>
+      <div class="feed-band-line" style="bottom:7.4%"></div>
+      <div class="feed-band-label" style="top:14%">4.0 m — too far for reliable depth</div>
+      <div class="feed-band-label" style="bottom:2%">0.8 m — too close</div>
+      <div class="feed-band-label" style="top:26%;font:700 30px var(--font-display);color:var(--mint)">Good floor — fit a course inside this band</div>
+      ${livePill(st, true)}
+      ${st.setup && st.setup.capturing ? `<div class="feed-progress"></div>` : ""}
     </div>
     <div class="card" style="padding:44px;display:flex;flex-direction:column">
       <div class="kicker mint">Step 1 of 5</div>
-      <h2 style="font-size:56px;line-height:1;margin:14px 0 16px">Clear the floor, capture it.</h2>
-      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted)">Move everything off the floor, then capture. The app averages 2 seconds of depth and fits the floor plane.</div>
+      <h2 style="font-size:56px;margin:14px 0 20px">Clear the floor.</h2>
+      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted)">Remove balls, cup, obstacles, feet. We photograph the bare floor once so anything added later shows up as “above floor”.</div>
       <div style="margin-top:auto;display:flex;flex-direction:column;gap:12px">
-        <button class="btn primary" data-action="confirm"><span>${st.setup.capturing ? "Capturing…" : "Capture floor"}</span>${RG.btnHint("confirm")}</button>
-        ${st.setup.capturing ? `<div style="height:4px;background:var(--fill-quiet);border-radius:999px;overflow:hidden"><div style="height:100%;width:100%;background:var(--mint);animation:rg-progress 2s linear"></div></div>` : ""}
+        <button class="btn primary stretch" data-action="confirm"><span>${st.setup.capturing ? "Capturing…" : "Capture floor"}</span>${RG.btnHint("confirm")}</button>
+        <div style="font:400 15px/1.45 var(--font-body);color:var(--text-muted)">${helper}</div>
       </div>
     </div>
-  </div>
-  <style>@keyframes rg-progress{from{width:0}to{width:100%}}</style>`;
+  </div>`;
 };
 
 S.S05 = function (st) {
+  const cur = (st.ui && st.ui.preset) || "medium";
+  const presets = [
+    ["small", "Small", "2 × 1.5 m"],
+    ["medium", "Medium", "3 × 2 m"],
+    ["large", "Large", "4 × 2.5 m"],
+  ];
   return `
-  ${topbar("Step 2 of 5 · Play area", { rail: stepRail(2) })}
+  ${topbar("", { rail: stepRail(2), back: false })}
   <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
-    <div style="position:relative;background:#242629;border-radius:24px;overflow:hidden"></div>
+    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
+      ${livePill(st, true)}
+      <div class="hints">${RG.hint("stick", "Move corner")}${RG.hint("confirm", "Place")}${RG.hint("undo", "Undo corner")}${RG.hint("secondary", "Close shape")}</div>
+    </div>
     <div class="card" style="padding:44px;display:flex;flex-direction:column">
       <div class="kicker mint">Step 2 of 5</div>
-      <h2 style="font-size:56px;line-height:1;margin:14px 0 16px">Draw the play area.</h2>
-      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted)">Click corners on the feed to trace the boundary, then close the shape. Presets give a starting rectangle.</div>
-      <div class="seg" style="margin:20px 0;flex-wrap:wrap">
-        ${(st.ui.presets || ["small", "medium", "large"]).map((p) => `<button class="opt" data-set-preset="${p}">${p === "small" ? "Small 2 × 1.5 m" : p === "medium" ? "Medium 3 × 2 m" : "Large 4 × 2.5 m"}</button>`).join("")}
+      <h2 style="font-size:56px;margin:14px 0 20px">Mark the course edge.</h2>
+      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-bottom:28px">Click four or more corners on the floor. Balls stopping outside are out of bounds.</div>
+      <div class="kicker" style="margin-bottom:10px">Start from a preset</div>
+      <div class="seg presets">
+        ${presets.map(([id, name, sub]) => `<button type="button" class="opt ${id === cur ? "sel" : ""}" data-set-preset="${id}">${name}<span class="sub">${sub}</span></button>`).join("")}
       </div>
       <div style="margin-top:auto;display:flex;flex-direction:column;gap:12px">
-        <button class="btn primary" data-action="confirm"><span>Use this area</span>${RG.btnHint("confirm")}</button>
-        <button class="btn secondary" data-action="clear"><span>Clear corners</span>${RG.btnHint("undo")}</button>
+        <button class="btn primary stretch" data-action="confirm"><span>Use this area</span>${RG.btnHint("confirm")}</button>
+        <button class="btn secondary stretch quiet" data-action="clear"><span>Clear corners</span>${RG.btnHint("undo")}</button>
       </div>
     </div>
-  </div>
-  <div class="hints">${RG.hint("stick", "Move corner")}${RG.hint("confirm", "Place")}${RG.hint("undo", "Undo corner")}${RG.hint("secondary", "Close shape")}</div>`;
+  </div>`;
 };
 
 S.S06 = function (st) {
   const courses = st.ui.courses || [];
   const cur = st.game && st.game.course_id;
   return `
-  ${photo("s06", "saturate(.8)", "linear-gradient(180deg,rgba(21,23,28,.4) 0%,rgba(21,23,28,.92) 60%)")}
-  ${topbar("Step 3 of 5 · Course", { rail: stepRail(3), back: false })}
+  ${photo("s06", "saturate(.8)", "linear-gradient(180deg,rgba(var(--ground-rgb),.4) 0%,rgba(var(--ground-rgb),.92) 60%)", { opacity: 0.28 })}
+  ${topbar("Step 3 of 5 · Course", { back: false, browse: true })}
   <div style="position:relative;padding:40px 56px 48px;display:flex;flex-direction:column;gap:20px;height:calc(100% - 96px)">
-    <div><h2 style="font-size:60px;line-height:1">Pick a course for hole 1.</h2>
-    <div style="font:400 21px var(--font-body);color:var(--text-muted)">Three templates authored for a 3.0 × 2.0 m play area.</div></div>
+    <div><h2 style="font-size:60px">Pick a course for hole 1.</h2>
+    <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-top:8px">Drawn for your ${(st.ui && st.ui.area_w) || "3.0"} × ${(st.ui && st.ui.area_h) || "2.0"} m area. You’ll place the real objects next and can nudge anything.</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;flex:1">
       ${courses.map((c, i) => {
         const sel = c.id === cur;
-        return `<div class="card" data-action="select" data-index="${i}" tabindex="0" role="button" style="text-align:left;cursor:pointer;${sel ? "background:var(--text);color:var(--player-text);border:2px solid var(--text)" : "border:2px solid transparent"}">
+        return `<div class="card" data-action="select" data-index="${i}" tabindex="0" role="button" style="text-align:left;cursor:pointer;${sel ? "background:var(--invert);color:var(--invert-text);border:2px solid var(--invert)" : "border:2px solid transparent"}">
           <div class="row" style="justify-content:space-between">
             <div><div class="kicker" style="opacity:.7">${esc(c.level)}</div>
-            <div style="font:800 40px/1 var(--font-display)">${esc(c.name)}</div></div>
-            <span class="pill" style="${sel ? "background:var(--player-text);color:var(--text)" : ""}">Par ${c.par}</span>
+            <div style="font:800 40px/1 var(--font-display);letter-spacing:-.02em;margin-top:6px">${esc(c.name)}</div></div>
+            <span class="pill" style="${sel ? "background:var(--invert-text);color:var(--invert)" : ""}">Par ${c.par}</span>
           </div>
           <div style="margin:16px 0;aspect-ratio:3/2;border-radius:16px;background:${sel ? "#e3e0d8" : "#15171c"};position:relative;overflow:hidden">
             ${courseMap(c, sel)}
@@ -231,10 +258,10 @@ S.S07 = function (st) {
     <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">${rebuilding ? `Rebuild hole ${st.game.hole}.` : `Build “${esc(course.name || "")}”.`}</h2>
     <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Put each object roughly inside its ghost — the ticks are a hint. When everything is down, scan: the app measures what’s really on the floor and you confirm it.</div>
     <div class="col" style="margin-top:20px;gap:8px;overflow:auto">
-      ${ghosts.map((g) => `<div class="row" style="background:var(--fill-quiet);border-radius:14px;padding:14px 16px">
-        <span style="width:30px;height:30px;border-radius:50%;background:var(--mint);display:grid;place-items:center;color:var(--mint-text);font:700 18px var(--font-display)">✓</span>
+      ${ghosts.map((g) => `<div class="row" style="background:rgba(242,239,232,.05);border-radius:14px;padding:14px 16px">
+        <span style="width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;${g.seen ? "background:var(--mint);color:var(--mint-text);font:700 18px var(--font-display)" : "border:1px solid rgba(242,239,232,.3)"}">${g.seen ? "✓" : ""}</span>
         <div style="flex:1"><div style="font:700 19px var(--font-display)">${esc(g.label)}</div><div style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(g.item)}</div></div>
-        <span style="font:600 14px var(--font-body);color:var(--text-muted)">${(g.real_size_cm || []).join("×")} cm</span>
+        <span style="font:600 14px var(--font-body);color:var(--text-muted)">~${(g.real_size_cm || []).join(" × ")} cm</span>
       </div>`).join("")}
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
@@ -252,17 +279,17 @@ S["S07b"] = function (st) {
   return `
   <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:520px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
     <div class="kicker mint">Step 3 of 5 · Obstacles</div>
-    <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">Found ${obs.length} objects.</h2>
-    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Outlines are approximate on purpose — dashed = proposed, not yet on the course.</div>
+    <h2 style="font-size:48px;margin:8px 0 10px">Found ${obs.length} objects.</h2>
+    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Outlines are approximate on purpose — they only draw the map and keep hidden balls from counting as lost. Delete anything that isn’t an object, then confirm.</div>
     <div class="col" style="margin-top:20px;gap:8px;overflow:auto">
-      ${obs.map((o, i) => `<div class="row" style="background:${o.confidence < 0.7 ? "rgba(255,107,87,.1)" : "var(--fill-quiet)"};border:${o.confidence < 0.7 ? "1px solid rgba(255,107,87,.35)" : "none"};border-radius:14px;padding:12px 14px">
+      ${obs.map((o, i) => `<div class="row" data-action="select" data-index="${i}" tabindex="0" role="button" style="cursor:pointer;background:${o.confidence < 0.7 ? "rgba(255,107,87,.1)" : "rgba(242,239,232,.05)"};border:${o.confidence < 0.7 ? "1px solid rgba(255,107,87,.35)" : "none"};border-radius:14px;padding:12px 14px">
         <span style="width:30px;height:30px;border-radius:50%;background:${o.confidence < 0.7 ? "var(--coral)" : "var(--mint)"};display:grid;place-items:center;color:var(--mint-text);font:800 16px var(--font-display)">${i + 1}</span>
         <div style="flex:1;min-width:0"><div class="nowrap" style="font:700 19px/1.3 var(--font-display)">${esc(o.label)}</div><div class="text-muted nowrap" style="font:400 14px var(--font-body)">${esc(o.kind)}</div></div>
         <span class="pill" style="font-size:13px;background:${o.confidence >= 0.7 ? "var(--mint)" : "var(--coral)"};color:var(--mint-text)">${Math.round(o.confidence * 100)}%</span>
       </div>`).join("")}
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
-      <button class="btn primary" data-action="confirm_all" ${flagged.length ? "disabled" : ""}><span>Confirm all</span>${RG.btnHint("confirm")}</button>
+      <button class="btn primary stretch" data-action="confirm_all" ${flagged.length ? "disabled" : ""}><span>Confirm all</span>${RG.btnHint("confirm")}</button>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <button class="btn secondary" data-action="redetect"><span>Re-detect</span>${RG.btnHint("next")}</button>
         <button class="btn secondary" data-action="draw"><span>Draw one</span>${RG.btnHint("secondary")}</button>
@@ -278,24 +305,40 @@ S["S07b"] = function (st) {
 S["S07c"] = function (st) {
   const obs = st.ui.obstacles || [];
   const sel = st.ui.selected;
+  const pending = obs.filter((o) => o.state === "proposed" || o.state === "drawing");
+  const drawing = obs.filter((o) => o.state === "drawing").length;
+  const statusLabel = { proposed: "Pending", confirmed: "Confirmed", selected: "Selected", deleted: "Deleted", drawing: "Drawing" };
+  const selected = sel != null ? obs[sel] : null;
   return `
+  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span></div>
+  <div class="legend">
+    <span class="pill">${`<span class="swatch" style="background:var(--mint)"></span>`} Selected</span>
+    <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
+    <span class="pill">${`<span class="swatch" style="background:rgba(242,239,232,.3)"></span>`} Pending</span>
+    <span class="pill">${`<span class="swatch" style="background:var(--coral);opacity:.35"></span>`} Deleted</span>
+  </div>
   <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:520px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
-    <div class="kicker mint">Object ${(sel != null ? sel + 1 : 1)} · ${sel != null ? esc((obs[sel] || {}).label || "") : ""}</div>
-    <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">Fix the outline.</h2>
-    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Drag a corner to resize. Click an edge to add a corner; Delete removes one.</div>
+    <div class="kicker mint">Object ${(sel != null ? sel + 1 : 1)} · ${selected ? esc(selected.label || "") : ""}</div>
+    <h2 style="font-size:48px;margin:8px 0 10px">Fix the outline.</h2>
+    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Drag the corners until the outline roughly covers the object. Close enough is good enough. Click an edge to add a corner; press stick to remove one.</div>
     <div class="col" style="margin-top:20px;gap:8px;overflow:auto">
-      ${obs.map((o, i) => `<div class="row" style="background:var(--fill-quiet);border-radius:14px;padding:12px 14px">
-        <span style="width:28px;height:28px;border-radius:50%;background:var(--fill-quiet);display:grid;place-items:center;font:800 15px var(--font-display)">${i + 1}</span>
-        <div style="flex:1"><div style="font:700 19px var(--font-display)">${esc(o.label)}</div></div>
-        <span class="pill" style="font-size:13px">${esc(o.state)}</span>
-      </div>`).join("")}
+      ${obs.map((o, i) => {
+        const state = i === sel ? "selected" : (o.state === "proposed" ? "pending" : o.state);
+        const label = i === sel ? "Selected" : (statusLabel[o.state] || o.state);
+        return `<div class="row" data-action="select" data-index="${i}" tabindex="0" role="button" style="cursor:pointer;background:rgba(242,239,232,.05);border-radius:14px;padding:12px 14px">
+        <span style="width:28px;height:28px;border-radius:50%;background:rgba(242,239,232,.1);display:grid;place-items:center;font:800 15px var(--font-display)">${i + 1}</span>
+        <div style="flex:1"><div style="font:700 19px var(--font-display)">${esc(o.label)}</div><div style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(o.kind || "")}</div></div>
+        <span class="status-pill ${state}">${esc(label)}</span>
+      </div>`;
+      }).join("")}
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
-      <button class="btn primary" data-action="confirm"><span>Confirm this outline</span>${RG.btnHint("confirm")}</button>
-      <button class="btn secondary" data-action="confirm" ${obs.some((o) => o.state === "proposed" || o.state === "drawing") ? "disabled" : ""}><span>Course is set</span></button>
+      <button class="btn primary stretch" data-action="confirm_one"><span>Confirm this outline</span>${RG.btnHint("confirm")}</button>
+      <button class="btn secondary stretch quiet" data-action="confirm" ${pending.length ? "disabled" : ""}><span>Course is set</span><span class="meta">${pending.length} pending${drawing ? ` · ${drawing} drawing` : ""}</span></button>
+      <div style="font:400 14px var(--font-body);color:var(--text-muted)">Undo steps back through every edit in this step, including re-detects.</div>
     </div>
   </div>
-  <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add corner")}${RG.hint("prev", "Undo")}</div>`;
+  <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add / remove corner")}${RG.hint("prev", "Undo")}</div>`;
 };
 
 S.S08 = function (st) {
@@ -304,7 +347,7 @@ S.S08 = function (st) {
   <div class="glass" style="position:absolute;left:56px;top:56px;max-width:800px;border-radius:24px;padding:32px 40px;z-index:3">
     <div class="kicker mint">Step 4 of 5 · Cup</div>
     <h2 style="font-size:60px;line-height:1;margin:10px 0 14px">${searching ? "Place the putting cup inside the play area." : "Found the cup."}</h2>
-    ${searching ? `<div style="height:4px;background:var(--fill-quiet);border-radius:999px;overflow:hidden"><div style="height:100%;width:40%;background:var(--mint);animation:rg-slide 1.5s linear infinite"></div></div>` : `<div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">The white ring is detected. Adjust by dragging if it’s off.</div>`}
+    ${searching ? `<div style="height:4px;background:var(--fill-quiet);border-radius:999px;overflow:hidden;margin-top:16px"><div style="height:100%;width:40%;background:var(--mint);animation:rg-slide 1.5s linear infinite"></div></div>` : `<div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft);margin-top:14px">Averaged 1.5 s of depth and matched the white ring. Is the mint point on the opening? Drag the circle, or the dot to resize.</div>`}
   </div>
   <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
     <button class="btn primary" data-action="confirm"><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
@@ -320,22 +363,22 @@ S.S09 = function (st) {
   return `
   <div style="position:absolute;left:56px;top:56px;z-index:3"><h2 style="font:800 48px var(--font-display)">Put every ball on the floor.</h2></div>
   <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:640px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
-    <div class="kicker">${balls.length} balls found · 0 rejected</div>
-    <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">Who’s who?</h2>
-    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Each ball is sampled for its hue. Give each player a name.</div>
+    <div class="kicker">${balls.length} balls found · ${(st.ui.rejected || 0)} rejected</div>
+    <h2 style="font-size:48px;margin:8px 0 10px">Who’s who?</h2>
+    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Type a name next to each ball. Order here is tee-off order; drag rows to reorder. Tap a swatch to re-sample if lighting changed.</div>
     <div class="col" style="margin-top:20px;gap:10px;overflow:auto">
-      ${players.map((p, i) => `<div class="row" style="background:var(--fill-quiet);border-radius:16px;padding:10px 12px 10px 16px">
+      ${players.map((p, i) => `<div class="row" style="background:rgba(242,239,232,.05);border-radius:16px;padding:10px 12px 10px 16px">
         <span style="width:20px;font:700 16px var(--font-display);color:var(--text-muted)">${i + 1}</span>
         ${dot(p.color, 48)}
-        <input class="player-name" data-index="${i}" value="${esc(p.name)}" style="background:var(--player-text);color:var(--text);border:1px solid var(--line-strong);border-radius:12px;padding:12px 16px;font:700 22px var(--font-display);width:220px">
+        <input class="player-name" data-text="player_name" data-index="${i}" value="${esc(p.name)}" style="background:#15171c;color:#f2efe8;border:1px solid var(--line-strong);border-radius:12px;padding:12px 16px;font:700 22px var(--font-display);flex:1;min-width:0">
         <span style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(p.hue_name)}</span>
-        <span style="margin-left:auto;color:var(--text-muted)">⋮⋮</span>
+        <span style="color:var(--text-muted);letter-spacing:.12em">⋮⋮</span>
       </div>`).join("")}
-      <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">Room for two more balls — max 6 players.</div>
+      <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">Room for ${Math.max(0, 6 - players.length)} more ball${players.length === 5 ? "" : "s"} — max 6 players.</div>
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
-      <button class="btn primary" data-action="confirm"><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
-      <div style="font:400 14px var(--font-body);color:var(--text-muted)">Saved to rumpus-setup.json.</div>
+      <button class="btn primary stretch" data-action="confirm"><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
+      <div style="font:400 14px var(--font-body);color:var(--text-muted)">Writes rumpus-setup.json: floor plane, play area, course template, hole zone, ball hues, names.</div>
     </div>
   </div>`;
 };
@@ -345,23 +388,24 @@ S.S10 = function (st) {
   const holes = st.ui.holes;
   const cap = st.ui.stroke_cap;
   return `
-  ${photo("s10", "saturate(.75) brightness(.8)", "linear-gradient(90deg,rgba(21,23,28,.95) 0%,rgba(21,23,28,.35) 48%,rgba(21,23,28,.6) 100%)")}
+  ${photo("s10", "saturate(.75) brightness(.8)", "linear-gradient(90deg,rgba(var(--ground-rgb),.95) 0%,rgba(var(--ground-rgb),.35) 48%,rgba(var(--ground-rgb),.6) 100%)", { opacity: 0.3 })}
   <div style="position:relative;display:grid;grid-template-columns:1fr 760px;gap:32px;padding:56px;height:100%">
     <div class="col" style="gap:20px">
       <div class="kicker mint">Setup saved · Living room</div>
-      <h2 style="font:800 112px/1 var(--font-display);letter-spacing:-.045em">Game /<br>night.</h2>
+      <h2 style="font:800 112px/1 var(--font-display);letter-spacing:-.045em">Game<br>night.</h2>
       <div>
         <div class="kicker">Holes this game</div>
         <div class="seg" style="max-width:760px;margin-top:10px">
           ${[1,2,3,4,5,6,7,8,9].map((n) => `<button class="opt ${n === holes ? "sel" : ""}" data-set-holes="${n}">${n}</button>`).join("")}
         </div>
+        <div style="font:400 16px var(--font-body);color:var(--text-muted);margin-top:8px">Hole 1 → Beginner, 2 → Advanced, 3 → Expert, then repeat. Swap any hole’s course from Pause.</div>
       </div>
       <div>
         <div class="kicker">Stroke cap</div>
         <div class="row" style="margin-top:10px">
-          <button class="btn secondary" style="width:56px;height:56px;padding:0;justify-content:center" data-set-cap="${cap - 1}">−</button>
+          <button type="button" class="stepper" data-set-cap="${cap - 1}">−</button>
           <span style="font:700 28px var(--font-display);min-width:120px;text-align:center">${cap} strokes</span>
-          <button class="btn secondary" style="width:56px;height:56px;padding:0;justify-content:center" data-set-cap="${cap + 1}">+</button>
+          <button type="button" class="stepper" data-set-cap="${cap + 1}">+</button>
         </div>
       </div>
       <div style="margin-top:auto"><button class="btn primary lg" data-action="confirm"><span>Tee off</span>${RG.btnHint("confirm")}</button></div>
@@ -392,9 +436,9 @@ S.S11 = function (st) {
     <div class="row" style="gap:16px;align-items:stretch">
       ${a ? `<div style="background:${a.color};color:var(--player-text);border-radius:24px;padding:26px 40px;box-shadow:var(--shadow-card);display:flex;align-items:center;gap:36px">
         <div><div class="kicker" style="opacity:.7;color:var(--player-text)">Your turn</div><div style="font:800 76px/1.15 var(--font-display);overflow:hidden">${marquee(a.name)}</div></div>
-        <div style="width:2px;align-self:stretch;background:rgba(21,23,28,.25)"></div>
+        <div style="width:2px;align-self:stretch;background:rgba(var(--ground-rgb),.25)"></div>
         <div><div class="kicker" style="opacity:.7;color:var(--player-text)">Stroke</div><div style="font:800 76px/1.15 var(--font-display)">${activeStrokes}</div></div>
-        <div style="width:2px;align-self:stretch;background:rgba(21,23,28,.25)"></div>
+        <div style="width:2px;align-self:stretch;background:rgba(var(--ground-rgb),.25)"></div>
         <div style="font:600 26px/1.25 var(--font-body);max-width:420px;opacity:.85">${esc(status)}</div>
       </div>` : ""}
       <div class="row" style="margin-left:auto;gap:10px;align-items:stretch">
@@ -421,7 +465,7 @@ S.S12 = function (st) {
   const p = st.ui.player || {};
   const stroke = st.ui.stroke;
   return `
-  <div style="position:absolute;inset:0;background:rgba(21,23,28,.4);z-index:4"></div>
+  <div style="position:absolute;inset:0;background:rgba(var(--ground-rgb),.4);z-index:4"></div>
   <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${p.color};color:var(--player-text);border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5">
     <div class="kicker" style="color:var(--player-text);opacity:.65">Next up</div>
     <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name)}</div>
@@ -479,10 +523,10 @@ S.S15 = function (st) {
   const active = ui.active || {};
   const scores = ui.scores || {};
   return `
-  ${photo("s15", "saturate(.75) brightness(.7)", "linear-gradient(90deg,rgba(21,23,28,.55) 0%,rgba(21,23,28,.2) 45%,rgba(21,23,28,.75) 100%)")}
+  ${photo("s15", "saturate(.75) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.55) 0%,rgba(var(--ground-rgb),.2) 45%,rgba(var(--ground-rgb),.75) 100%)")}
   <div class="glass-strong" style="position:absolute;left:40px;top:40px;bottom:40px;width:680px;border-radius:28px;padding:48px;z-index:3;display:flex;flex-direction:column">
     <div class="kicker muted">Hole ${ui.hole} · ${esc(active.name || "")} to play</div>
-    <h2 style="font-size:88px;line-height:1">Paused.</h2>
+    <h2 style="font-size:88px">Paused.</h2>
     <div class="col" style="margin-top:24px;gap:8px">
       ${rows.map(([label, key, verb], i) => `<button class="row" data-action="select" data-index="${i}" style="border-radius:16px;padding:18px 22px;font:700 26px var(--font-display);background:${i === focus ? "var(--mint)" : "var(--fill-quiet)"};color:${i === focus ? "var(--mint-text)" : "var(--text)"};border:none;text-align:left;cursor:pointer">
         <span style="flex:1">${esc(label)}</span>${RG.glyph(verb)}
@@ -525,8 +569,8 @@ S.S16 = function (st) {
     </div>
     <div class="card" style="padding:40px">
       <div class="kicker">Event log · newest first</div>
-      <div style="background:var(--text);color:var(--player-text);border-radius:18px;padding:20px 24px;margin-top:16px">
-        <div class="kicker" style="color:var(--player-text);opacity:.7">Undo last shot</div>
+      <div style="background:var(--invert);color:var(--invert-text);border-radius:18px;padding:20px 24px;margin-top:16px">
+        <div class="kicker" style="color:var(--invert-text);opacity:.7">Undo last shot</div>
         <div style="font:700 24px var(--font-display)">${esc((st.game.event_log || []).slice(-1)[0] ? "Most recent stroke" : "No events yet")}</div>
       </div>
       <div class="col" style="margin-top:16px;gap:0">
@@ -574,7 +618,7 @@ S.S17 = function (st) {
         <div style="font:600 22px var(--font-body);opacity:.75">${lead.total} strokes · ${lead.vs_par}</div>
       </div>` : ""}
       ${next ? `<div style="position:relative;overflow:hidden;border-radius:24px;flex:1;display:flex;flex-direction:column">
-        ${photo("s17", "saturate(.8)", "linear-gradient(180deg,rgba(21,23,28,.35) 0%,rgba(21,23,28,.92) 70%)")}
+        ${photo("s17", "saturate(.8)", "linear-gradient(180deg,rgba(var(--ground-rgb),.35) 0%,rgba(var(--ground-rgb),.92) 70%)")}
         <div style="position:relative;padding:36px 40px;margin-top:auto">
           <div class="kicker" style="color:var(--text-soft)">Up next · Hole ${st.ui.next_hole}</div>
           <div style="font:800 44px/1 var(--font-display)">${esc(next.name)}</div>
@@ -595,7 +639,7 @@ S.S18 = function (st) {
       <div class="kicker" style="color:var(--player-text);opacity:.65">Champion · ${st.game.holes} holes</div>
       <div style="font:800 190px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(c.name)}</div>
       <div style="font:700 40px var(--font-display);opacity:.8">${c.total} strokes · ${c.vs_par}</div>
-      <div style="margin-top:auto;height:280px;border-radius:20px;background:repeating-linear-gradient(45deg,rgba(21,23,28,.18) 0 14px,rgba(21,23,28,.08) 14px 28px);position:relative">
+      <div style="margin-top:auto;height:280px;border-radius:20px;background:repeating-linear-gradient(45deg,rgba(var(--ground-rgb),.18) 0 14px,rgba(var(--ground-rgb),.08) 14px 28px);position:relative">
         <span class="pill" style="position:absolute;left:16px;bottom:16px;background:var(--player-text);color:var(--text);font:400 15px monospace">live snapshot from color camera · winning putt</span>
       </div>
     </div>
@@ -621,15 +665,19 @@ S.S18 = function (st) {
   </div>`;
 };
 
-function settingsCard(title, desc, inner) {
-  return `<div class="glass" style="border-radius:20px;padding:24px 28px">
-    ${title ? `<div style="font:700 24px var(--font-display)">${esc(title)}</div>${desc ? `<div style="font:400 16px var(--font-body);color:var(--text-muted);margin-top:2px">${esc(desc)}</div>` : ""}` : ""}
+function settingsCard(title, desc, inner, extra = "") {
+  return `<div class="s-card ${extra}">
+    ${title ? `<div class="s-card-title">${esc(title)}</div>${desc ? `<div class="s-card-desc">${esc(desc)}</div>` : ""}` : ""}
     ${inner || ""}
   </div>`;
 }
 
 S.S19 = function (st) {
   const s = st.settings || {};
+  s.music = s.music || {};
+  s.sfx = s.sfx || {};
+  s.controller = s.controller || {};
+  s.display = s.display || {};
   const ui = st.ui || {};
   const tab = ui.tab || "display";
   const theme = s.theme || "dark";
@@ -639,21 +687,40 @@ S.S19 = function (st) {
   const tabKeys = ["display", "rules", "players", "camera", "about"];
 
   const displayTab = `
-    ${settingsCard("Theme", "", `<div class="seg" style="margin-top:12px">${["dark", "light", "auto"].map((t) => `<button class="opt ${theme === t ? "sel" : ""}" data-set-theme="${t}">${t}</button>`).join("")}</div>`)}
-    ${settingsCard("Music", "Menu / gameplay soundtrack", `
-      <div class="row" style="margin-top:10px">
-        <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.music.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-music="${i === 0}">${t}</button>`).join("")}</div>
+    <div class="s-card s-inline">
+      <div class="grow"><div class="s-card-title">Theme</div><div class="s-card-desc">Dark keeps the room dim for the camera; light is for daytime play.</div></div>
+      <div class="seg">${["dark", "light", "auto"].map((t) => `<button type="button" class="opt ${theme === t ? "sel" : ""}" data-set-theme="${t}">${t[0].toUpperCase()}${t.slice(1)}</button>`).join("")}</div>
+    </div>
+    <div class="s-card" style="display:flex;flex-direction:column;gap:18px">
+      <div class="s-inline">
+        <div class="grow"><div class="s-card-title">Music</div><div class="s-card-desc">Lo-fi & jazz, CC-licensed. Ducks to 30% on pause.</div></div>
+        <div class="seg">${["On", "Off"].map((t, i) => `<button type="button" class="opt mint ${(s.music.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-music="${i === 0}">${t}</button>`).join("")}</div>
       </div>
-      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.music.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.music.volume || 0) * 100)}" data-set-musicvol style="flex:1"></div>`)}
-    ${settingsCard("Sound effects", "Ticks, thunks, plinks", `
-      <div class="row" style="margin-top:10px">
-        <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.sfx.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-sfx="${i === 0}">${t}</button>`).join("")}</div>
+      <div class="s-inline"><span class="text-muted" style="width:120px">Volume</span><input class="slider grow" type="range" min="0" max="100" value="${Math.round((s.music.volume || 0) * 100)}" data-set-musicvol><span style="font:700 18px var(--font-display);width:56px;text-align:right">${Math.round((s.music.volume || 0) * 100)}%</span></div>
+      <div class="s-inline"><span class="text-muted" style="width:120px">Playlist</span><div class="row" style="flex:1;flex-wrap:wrap;gap:8px">${[
+        ["lounge-jazz", "Lounge jazz"], ["lofi-hiphop", "Lo-fi hip hop"], ["both-shuffled", "Both, shuffled"]
+      ].map(([v, l]) => `<button type="button" class="chip ${(s.music.playlist || "lounge-jazz") === v ? "sel" : ""}" data-set-playlist="${v}">${l}</button>`).join("")}</div></div>
+    </div>
+    <div class="s-card" style="display:flex;flex-direction:column;gap:18px">
+      <div class="s-inline">
+        <div class="grow"><div class="s-card-title">Sound effects</div><div class="s-card-desc">Putter tick, bumps, cup plink, cheers, turn sting.</div></div>
+        <div class="seg">${["On", "Off"].map((t, i) => `<button type="button" class="opt mint ${(s.sfx.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-sfx="${i === 0}">${t}</button>`).join("")}</div>
       </div>
-      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.sfx.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.sfx.volume || 0) * 100)}" data-set-sfxvol style="flex:1"></div>`)}
-    ${settingsCard("Announcer", "Say player names on turn change", `<div class="row"><div class="toggle ${s.sfx.announcer ? "on" : ""}" data-set-announcer style="margin-left:auto"><span class="knob"></span></div></div>`)}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Controller rumble</div><div class="toggle ${s.controller.rumble ? "on" : ""}" data-set-rumble style="margin-left:auto"><span class="knob"></span></div></div></div>
-      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Show camera feed</div><div class="toggle ${s.display.showCameraFeed ? "on" : ""}" data-set-feed style="margin-left:auto"><span class="knob"></span></div></div></div>
+      <div class="s-inline"><span class="text-muted" style="width:120px">Volume</span><input class="slider grow" type="range" min="0" max="100" value="${Math.round((s.sfx.volume || 0) * 100)}" data-set-sfxvol><span style="font:700 18px var(--font-display);width:56px;text-align:right">${Math.round((s.sfx.volume || 0) * 100)}%</span></div>
+      <div class="s-inline">
+        <div class="grow"><div style="font:700 20px var(--font-display)">Announcer</div><div class="s-card-desc">Calls the next player’s name out loud.</div></div>
+        <button type="button" class="toggle ${s.sfx.announcer ? "on" : ""}" data-set-announcer><span class="knob"></span></button>
+      </div>
+    </div>
+    <div class="s-card" style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div class="s-inline">
+        <div class="grow"><div style="font:700 20px var(--font-display)">Controller rumble</div><div class="s-card-desc">Buzz on hole-out and turn change.</div></div>
+        <button type="button" class="toggle ${s.controller.rumble ? "on" : ""}" data-set-rumble><span class="knob"></span></button>
+      </div>
+      <div class="s-inline">
+        <div class="grow"><div style="font:700 20px var(--font-display)">Show camera feed</div><div class="s-card-desc">Off = zones only, no picture.</div></div>
+        <button type="button" class="toggle ${s.display.showCameraFeed ? "on" : ""}" data-set-feed><span class="knob"></span></button>
+      </div>
     </div>`;
 
   const rulesTab = `
@@ -664,8 +731,8 @@ S.S19 = function (st) {
       <button class="btn secondary" style="width:56px;height:56px;padding:0;justify-content:center" data-set-rule-cap="${(rules.strokeCap || 8) + 1}">+</button>
     </div>`)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      ${settingsCard("Out-of-bounds penalty", "Add +1 when a ball leaves the area", `<div class="row"><div class="toggle ${rules.oobPenalty ? "on" : ""}" data-set-rule-oob style="margin-left:auto"><span class="knob"></span></div></div>`)}
-      ${settingsCard("Tunnel bonus", "−1 when a ball goes through a tunnel", `<div class="row"><div class="toggle ${rules.tunnelBonus ? "on" : ""}" data-set-rule-tunnel style="margin-left:auto"><span class="knob"></span></div></div>`)}
+      ${settingsCard("Out-of-bounds penalty", "Add +1 when a ball leaves the area", `<div class="row"><button type="button" class="toggle ${rules.oobPenalty ? "on" : ""}" data-set-rule-oob style="margin-left:auto"><span class="knob"></span></button></div>`)}
+      ${settingsCard("Tunnel bonus", "−1 when a ball goes through a tunnel", `<div class="row"><button type="button" class="toggle ${rules.tunnelBonus ? "on" : ""}" data-set-rule-tunnel style="margin-left:auto"><span class="knob"></span></button></div>`)}
     </div>`;
 
   const players = (st.game && st.game.players) || [];
@@ -674,33 +741,42 @@ S.S19 = function (st) {
     : settingsCard("Players", "No players yet", `<div style="font:400 17px var(--font-body);color:var(--text-muted);margin-top:8px">Players are created during setup when you put colored balls on the floor (step 5).</div>`);
 
   const facts = sensor ? [
-    ["Model", sensor.model],
+    ["In use", sensor.model],
     ["Color", `${sensor.color_res[0]} × ${sensor.color_res[1]}`],
     ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "— (color only)"],
     ["Field of view", `${sensor.fov_h_deg}°`],
     ["Reliable range", `${sensor.reliable_min_m} – ${sensor.reliable_max_m} m`],
     ["Note", sensor.note || ""],
-  ] : [];
+  ] : [["In use", "No camera attached"]];
   const devices = cam.devices || [];
+  const selectedName = ((devices.find((d) => d.index === cam.active_device) || {}).driver)
+    || ((devices.find((d) => d.index === cam.active_device) || {}).name)
+    || "the selected camera";
+  const mockWarn = cam.is_mock
+    ? `<div class="warn-banner" style="margin-bottom:12px">Still on the mock sensor. Selected device is <strong>${esc(selectedName)}</strong>. Click Apply camera — close any other app using it first.</div>`
+    : "";
+  const err = cam.error ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.error)}</div>` : "";
   const cameraTab = `
-    ${settingsCard("Sensor", "What's attached right now", `<div style="display:grid;grid-template-columns:auto 1fr;gap:12px 32px;font:400 20px/1.4 var(--font-body);margin-top:14px">${facts.map(([k, v]) => `<span class="text-muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>`)}
+    ${mockWarn}${err}
+    ${settingsCard("Live preview", "What this camera sees right now", `<div class="feed-slot" data-feed-slot style="margin-top:14px;aspect-ratio:16/9;border-radius:16px"></div>`)}
+    ${settingsCard("Sensor", "What is actually attached right now", `<dl class="s-fact">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`)}
     ${settingsCard("Camera input", "Choose which device watches the floor", `
-      <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
-        <div class="row"><span style="width:130px">Device</span>
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px">
+        <div class="s-form-row"><label>Device</label>
           ${devices.length
-            ? `<select class="select grow" data-set-camera-device>${devices.map((d) => `<option value="${d.index}" ${d.index === cam.active_device ? "selected" : ""}>${esc(d.name)}${d.working ? "" : " (no signal)"}</option>`).join("")}</select>`
+            ? `<select class="select grow" data-set-camera-device>${devices.map((d) => `<option value="${d.index}" ${d.index === cam.active_device ? "selected" : ""}>${esc(d.driver || d.name)}${d.working ? "" : " — no signal"}</option>`).join("")}</select>`
             : `<span class="text-muted" style="font:400 17px var(--font-body)">${cam.scanning ? "Scanning for cameras…" : "No cameras found"}</span>`}
         </div>
-        <div class="row"><span style="width:130px">Resolution</span>
+        <div class="s-form-row"><label>Resolution</label>
           <select class="select grow" data-set-camera-resolution>${["640x480", "1280x720", "1920x1080"].map((r) => `<option value="${r}" ${r === cam.resolution ? "selected" : ""}>${r}</option>`).join("")}</select>
         </div>
-        <div class="row"><span style="width:130px">Backend</span>
+        <div class="s-form-row"><label>Backend</label>
           <select class="select grow" data-set-camera-backend>${[["auto", "Auto (Kinect → webcam → mock)"], ["webcam", "Webcam (2D)"], ["kinect", "Kinect only"]].map(([v, l]) => `<option value="${v}" ${v === cam.backend ? "selected" : ""}>${l}</option>`).join("")}</select>
         </div>
       </div>
-      <div class="row" style="margin-top:16px">
-        <button class="btn secondary sm" data-action="refresh_cameras"><span>Rescan cameras</span></button>
-        <span class="text-muted" style="font:400 14px var(--font-body)">Camera changes re-run the sensor check.</span>
+      <div class="row" style="margin-top:18px;gap:12px">
+        <button class="btn primary sm" data-action="apply_camera"><span>Apply camera</span></button>
+        <button class="btn secondary sm" data-action="refresh_cameras"><span>Rescan</span></button>
       </div>`)}`;
 
   const aboutTab = `
@@ -712,31 +788,48 @@ S.S19 = function (st) {
 
   const tabContent = { display: displayTab, rules: rulesTab, players: playersTab, camera: cameraTab, about: aboutTab }[tab] || displayTab;
 
+  const previewLight = theme === "light" || (theme === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
   return `
-  ${photo("s19", "saturate(.7) brightness(.75)", "linear-gradient(90deg,rgba(21,23,28,.97) 0%,rgba(21,23,28,.92) 48%,rgba(21,23,28,.35) 100%)")}
-  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Settings</span><span class="right">${RG.badge()}<span class="hint">${RG.glyph("back")}<span>Back</span></span></span></div>
-  <div style="position:absolute;left:56px;top:120px;bottom:56px;width:300px;display:flex;flex-direction:column;gap:8px;z-index:2">
-    ${["Display & sound", "Game rules", "Players", "Camera", "About"].map((t, i) => `<button data-action="settings-tab" data-index="${i}" style="border-radius:14px;padding:16px 20px;font:700 22px var(--font-display);text-align:left;border:none;cursor:pointer;background:${tabKeys[i] === tab ? "var(--text)" : "var(--fill-quiet)"};color:${tabKeys[i] === tab ? "var(--player-text)" : "var(--text)"}">${t}</button>`).join("")}
-    <div style="margin-top:auto;font:400 14px var(--font-body);color:var(--text-muted)">Rumpus Golf v${st.version}</div>
+  ${photo("s19", "saturate(.7) brightness(.75)", "linear-gradient(90deg,rgba(var(--ground-rgb),.97) 0%,rgba(var(--ground-rgb),.92) 48%,rgba(var(--ground-rgb),.35) 100%)")}
+  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Settings</span><span class="right">${RG.badge()}<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></span></div>
+  <div class="s19-rail">
+    ${["Display & sound", "Game rules", "Players", "Camera", "About"].map((t, i) => `<button type="button" class="s19-tab ${tabKeys[i] === tab ? "on" : ""}" data-action="settings-tab" data-index="${i}">${t}</button>`).join("")}
+    <div style="margin-top:auto;font:400 14px/1.5 var(--font-body);color:var(--text-muted)">Settings save instantly. Nothing here touches the calibration file.</div>
   </div>
-  <div class="col" style="position:absolute;left:388px;top:120px;bottom:56px;width:860px;overflow:auto;gap:12px;z-index:2;padding-right:6px">${tabContent}</div>
-  <div class="col" style="position:absolute;right:56px;top:120px;width:240px;gap:12px;z-index:2">
-    <button class="glass" style="border-radius:16px;padding:18px 22px;font:700 22px var(--font-display);border:none;text-align:left;cursor:pointer" data-action="credits">Credits →</button>
-    <button class="glass" style="border-radius:16px;padding:18px 22px;font:700 22px var(--font-display);border:none;text-align:left;cursor:pointer" data-action="changelog">What’s new</button>
+  <div class="s19-main">${tabContent}</div>
+  <div class="s19-aside">
+    <div class="kicker">Theme preview · ${previewLight ? "Light" : "Dark"}</div>
+    <div class="theme-preview ${previewLight ? "" : "dark"}">
+      <div style="background:#ff8a3d;color:#15171c;border-radius:14px;padding:16px 20px">
+        <div class="kicker" style="font-size:11px;color:#15171c;opacity:.7">Your turn</div>
+        <div style="font:800 40px/1.2 var(--font-display);letter-spacing:-.03em;margin-top:4px">Leo</div>
+      </div>
+      <div class="row" style="gap:8px">
+        <span class="theme-mini-chip">${dot("#ff5fa8", 12)} Maya</span>
+        <span class="theme-mini-chip">${dot("#5b8cff", 12)} Sam</span>
+        <span class="theme-mini-chip">${dot("#ffd84d", 12)} Rio</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;background:#0f7a5a;color:#f2efe8;padding:14px 18px;border-radius:12px;font:700 18px var(--font-display)"><span>Primary action</span><span style="margin-left:auto">${RG.glyph("confirm")}</span></div>
+      <div style="font:400 13px/1.45 var(--font-body);color:#5c6068">Light theme swaps ground/ink and deepens mint so contrast stays above 4.5:1. Ball colors are untouched.</div>
+    </div>
+    <div class="s19-aside-links">
+      <button type="button" class="s19-link" data-action="credits"><span>Credits</span><span class="meta">→</span></button>
+      <button type="button" class="s19-link" data-action="changelog"><span>What’s new</span><span class="pill" style="margin-left:auto;background:var(--mint);color:var(--mint-text);font:700 13px var(--font-display)">v${st.version}</span></button>
+    </div>
   </div>`;
 };
 
 S.S20 = function (st) {
   return `
-  ${photo("s20", "saturate(.8) brightness(.7)", "linear-gradient(90deg,rgba(21,23,28,.3) 0%,rgba(21,23,28,.85) 45%,rgba(21,23,28,.97) 100%)")}
-  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Credits</span><span class="right">${RG.badge()}<span class="hint">${RG.glyph("back")}<span>Back</span></span></span></div>
+  ${photo("s20", "saturate(.8) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.3) 0%,rgba(var(--ground-rgb),.85) 45%,rgba(var(--ground-rgb),.97) 100%)")}
+  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Credits</span><span class="right">${RG.badge()}<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></span></div>
   <div style="position:absolute;left:56px;bottom:56px;width:560px;z-index:2">
     <div class="kicker mint">Made with</div>
     <div style="font:800 88px/1 var(--font-display);letter-spacing:-.04em;text-shadow:0 2px 20px rgba(0,0,0,.5)">Books,<br>a cup and<br>a camera.</div>
     <div style="font:400 18px/1.5 var(--font-body);color:var(--text-soft)">Rumpus Golf v${st.version} · Python 3.11 · OpenCV · libfreenect / libfreenect2. No machine learning, no cloud — just your living room.</div>
   </div>
   <div style="position:absolute;left:760px;right:56px;top:120px;bottom:56px;display:grid;grid-template-columns:1fr 1fr;gap:16px;overflow:auto;z-index:2">
-    ${creditGroup("Music", [["Lobby Time — Kevin MacLeod", "CC BY 4.0"], ["Backed Vibes Clean — Kevin MacLeod", "CC BY 4.0"]])}
+    ${creditGroup("Music", [['"Lobby Time" Kevin MacLeod (incompetech.com)', "CC BY 4.0"], ['"Backed Vibes Clean" Kevin MacLeod (incompetech.com)', "CC BY 4.0"]])}
     ${creditGroup("Sound effects", [["Kenney — Interface Sounds", "CC0"], ["Kenney — Impact Sounds", "CC0"], ["Freesound — small crowd cheer", "CC0"]])}
     ${creditGroup("Photography", [["Alex Gruber", "Unsplash"], ["Minh Pham", "Unsplash"], ["mark tulin", "Unsplash"], ["Waldemar Brandt", "Unsplash"], ["Clay Banks", "Unsplash"], ["Kayla Farmer", "Unsplash"], ["Spacejoy", "Unsplash"], ["Aaron Burden", "Unsplash"], ["Katja Rooke", "Unsplash"]])}
     ${creditGroup("Open source", [["OpenCV", "Apache 2.0"], ["libfreenect", "Apache 2.0 / GPL 2"], ["libfreenect2", "Apache 2.0 / GPL 2"]])}
@@ -747,7 +840,7 @@ function creditGroup(title, items) {
   return `<div class="glass" style="border-radius:20px;padding:24px 28px">
     <div class="kicker mint">${title}</div>
     <div class="col" style="margin-top:12px;gap:10px">
-      ${items.map(([t, l]) => `<div class="row" style="justify-content:space-between"><span style="font:700 19px/1.3 var(--font-display)">${esc(t)}</span><span class="pill" style="font-size:12px">${esc(l)}</span></div>`).join("")}
+      ${items.map(([t, l]) => `<div class="row" style="justify-content:space-between;gap:12px"><span style="font:700 19px/1.3 var(--font-display)">${esc(t)}</span><span class="pill license">${esc(l)}</span></div>`).join("")}
     </div>
   </div>`;
 }
@@ -755,8 +848,8 @@ function creditGroup(title, items) {
 S.S21 = function (st) {
   const rels = st.ui.changelog || [];
   return `
-  ${photo("s21", "saturate(.7) brightness(.7)", "linear-gradient(90deg,rgba(21,23,28,.97) 0%,rgba(21,23,28,.9) 55%,rgba(21,23,28,.3) 100%)")}
-  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">What’s new</span><span class="right">${RG.badge()}<span class="hint">${RG.glyph("back")}<span>Back</span></span></span></div>
+  ${photo("s21", "saturate(.7) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.97) 0%,rgba(var(--ground-rgb),.9) 55%,rgba(var(--ground-rgb),.3) 100%)")}
+  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">What’s new</span><span class="right">${RG.badge()}<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></span></div>
   <div style="position:absolute;left:56px;top:120px;width:420px;z-index:2">
     <div class="kicker mint">Current version</div>
     <div style="font:800 120px/1 var(--font-display);letter-spacing:-.05em">v${st.version}</div>

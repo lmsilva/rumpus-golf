@@ -46,7 +46,7 @@ RG.btnHint = function (verb) {
   return `<span class="hint">${RG.glyph(verb)}</span>`;
 };
 
-RG.badge = function () {
+RG.badge = function (framed) {
   const label = RG.inputMode === "controller" ? "Controller connected" : "Keyboard & mouse";
-  return `<span class="badge"><span class="dot"></span>${label}</span>`;
+  return `<span class="badge${framed ? " framed" : ""}"><span class="dot"></span>${label}</span>`;
 };

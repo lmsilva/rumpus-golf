@@ -40,13 +40,20 @@ def parse_resolution(spec: str) -> tuple[int, int]:
     return (1280, 720)
 
 
-def list_webcams(max_index: int = 8) -> list[dict]:
-    """Probe capture indices 0..max_index and return the ones that answer.
+def list_webcams(max_index: int = 8, probe: bool = False) -> list[dict]:
+    """Return capture devices with driver names.
 
-    Opening a device also does a throwaway read so the "working" flag reflects
-    whether a real frame arrives (not just a driver that opens). This can take
-    a moment — call it once at startup or on an explicit "rescan".
+    By default this is names-only (DirectShow / V4L2) so we never steal the
+    camera the game is already using. Set ``probe=True`` only on an explicit
+    rescan when no backend is holding a device.
     """
+    from .devices import attach_names, list_capture_names
+    names = list_capture_names()
+    if names and not probe:
+        return [
+            {"index": i, "name": n, "driver": n, "working": True}
+            for i, n in enumerate(names)
+        ]
     cams: list[dict] = []
     for i in range(max_index):
         cap = None
@@ -63,7 +70,7 @@ def list_webcams(max_index: int = 8) -> list[dict]:
                     cap.release()
                 except Exception:
                     pass
-    return cams
+    return attach_names(cams, names or None)
 
 
 class WebcamBackend(SensorBackend):
@@ -71,8 +78,14 @@ class WebcamBackend(SensorBackend):
         w, h = parse_resolution(resolution)
         self.index = index
         self.resolution = (w, h)
+        try:
+            from .devices import list_capture_names
+            names = list_capture_names()
+            model = names[index] if 0 <= index < len(names) else f"Webcam {index}"
+        except Exception:
+            model = f"Webcam {index}"
         self.description = SensorDescription(
-            model=f"Webcam {index}",
+            model=model,
             color_res=(w, h),
             depth_res=(0, 0),          # color-only marker
             fov_h_deg=70.0,
@@ -95,20 +108,30 @@ class WebcamBackend(SensorBackend):
         return False
 
     def open(self) -> bool:
-        try:
-            cap = cv2.VideoCapture(self.index, _backend_api())
-        except Exception:
-            return False
-        if not cap.isOpened():
-            cap.release()
-            return False
-        w, h = self.resolution
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-        cap.read()  # let the device settle / apply the requested size
-        self._cap = cap
-        self._opened = True
-        return True
+        # DirectShow is exclusive and can need a beat after another handle
+        # (our own enumerator, Zoom, etc.) lets go.
+        for attempt in range(4):
+            cap = None
+            try:
+                cap = cv2.VideoCapture(self.index, _backend_api())
+            except Exception:
+                cap = None
+            if cap is not None and cap.isOpened():
+                w, h = self.resolution
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+                cap.read()
+                self._cap = cap
+                self._opened = True
+                return True
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            if attempt < 3:
+                time.sleep(0.35)
+        return False
 
     def close(self) -> None:
         if self._cap is not None:
