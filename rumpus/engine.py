@@ -172,6 +172,7 @@ class GameEngine:
         self._ball_was_moving: dict[str, bool] = {}
         self._shot_armed = False
         self._tee_seen_since = 0.0
+        self._tee_click: tuple[float, float, float] | None = None
 
         # Settings return-state.
         self._settings_return: str = S.BOOT
@@ -320,6 +321,7 @@ class GameEngine:
             if self.state == S.CAL_BALLS:
                 self._maybe_scan_setup_balls(now)
             if self.state in (S.GAME_START, S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
+                self._ensure_mapper()
                 if self.mapper is not None:
                     self.tracker.update(self._frame_color, None, self.mapper,
                                         self.cam, self.plane, self._confirmed_obstacles(), now,
@@ -1381,7 +1383,7 @@ class GameEngine:
             self._undo_last_shot()
         elif action in ("confirm", "ready"):
             if not self._shot_armed:
-                self._arm_shot()
+                self._confirm_tee()
 
     def _enter_pause(self) -> None:
         if self.state == S.PAUSE:
@@ -1599,7 +1601,24 @@ class GameEngine:
             else:
                 self._pointer_putt(nx, ny)
 
+    def _ensure_mapper(self) -> bool:
+        if self.mapper is not None:
+            return True
+        cam_cfg = self.setup.camera or {}
+        if cam_cfg.get("mode") == "homography" and cam_cfg.get("H"):
+            try:
+                H = np.array(cam_cfg["H"], dtype=float).reshape(3, 3)
+                self.mapper = HomographyMapper(H)
+                self.plane = None
+                return True
+            except Exception:
+                pass
+        if self.is_color_only and len(self._draw_poly) == 4:
+            self._build_homography()
+        return self.mapper is not None
+
     def _feed_to_floor(self, nx: float, ny: float) -> tuple[float, float] | None:
+        self._ensure_mapper()
         if self.mapper is None:
             return None
         px = nx * self._feed_w
@@ -1755,16 +1774,21 @@ class GameEngine:
 
     def _pointer_place_tee(self, nx: float, ny: float) -> None:
         """Click the live feed to tell the game where the teeing ball is."""
-        floor = self._feed_to_floor(nx, ny)
-        if floor is None:
-            return
+        self._ensure_mapper()
         bid = self._active_ball_id()
         if bid is None:
             return
-        self._ball_positions[bid] = (float(floor[0]), float(floor[1]))
-        self.tracker.seed_position(bid, (float(floor[0]), float(floor[1])))
-        if self._in_start_zone(floor):
-            self._arm_shot()
+        floor = self.tracker.find_near_pixel(
+            bid, self._frame_color, self.mapper, nx, ny, self.setup.play_area,
+        )
+        if floor is None:
+            floor = self._feed_to_floor(nx, ny)
+        if floor is None and self.setup.start is not None:
+            floor = (self.setup.start.x, self.setup.start.y)
+        if floor is None:
+            return
+        self._tee_click = (float(nx), float(ny), time.time() + 1.6)
+        self._place_tee_at(bid, (float(floor[0]), float(floor[1])), arm=True)
 
     def _pointer_putt(self, nx: float, ny: float) -> None:
         if self._putt is not None:
@@ -2106,12 +2130,12 @@ class GameEngine:
         if self.state != S.PLAY:
             return
         if not self._shot_armed:
-            pos = tb.smoothed
-            if pos is not None and not tb.moving and not tb.lost and self._in_start_zone(pos):
+            pos = tb.smoothed if tb.smoothed is not None else self._ball_positions.get(ball_id)
+            if pos is not None and not tb.moving and self._in_start_zone(pos):
                 if self._tee_seen_since <= 0:
                     self._tee_seen_since = now
                 elif now - self._tee_seen_since >= 0.5:
-                    self._arm_shot()
+                    self._place_tee_at(ball_id, pos, arm=True)
             else:
                 self._tee_seen_since = 0.0
             self._ball_was_moving[ball_id] = False
@@ -2129,7 +2153,7 @@ class GameEngine:
         if pos is None or self.setup.start is None:
             return False
         s = self.setup.start
-        return float(np.hypot(pos[0] - s.x, pos[1] - s.y)) <= (s.r + 0.08)
+        return float(np.hypot(pos[0] - s.x, pos[1] - s.y)) <= (s.r + 0.22)
 
     def _sync_shot_arm(self) -> None:
         p = self._active_player()
@@ -2141,6 +2165,27 @@ class GameEngine:
         self._shot_armed = self._current_strokes(p.id) > 0
         self._tee_seen_since = 0.0
 
+    def _place_tee_at(self, bid: str, pos: tuple[float, float], arm: bool) -> None:
+        self._ball_positions[bid] = (float(pos[0]), float(pos[1]))
+        self.tracker.seed_position(bid, (float(pos[0]), float(pos[1])), hold=True)
+        if arm:
+            self._arm_shot()
+
+    def _confirm_tee(self) -> None:
+        """Player says the ball is ready — pin it and start the hole."""
+        bid = self._active_ball_id()
+        pos = self._ball_positions.get(bid) if bid else None
+        if pos is None and bid:
+            tb = self.tracker.balls.get(bid)
+            if tb is not None and tb.smoothed is not None:
+                pos = tb.smoothed
+        if pos is None and self.setup.start is not None:
+            pos = (self.setup.start.x, self.setup.start.y)
+        if bid and pos is not None:
+            self._place_tee_at(bid, pos, arm=True)
+        else:
+            self._arm_shot()
+
     def _arm_shot(self) -> None:
         self._shot_armed = True
         self._tee_seen_since = 0.0
@@ -2149,7 +2194,7 @@ class GameEngine:
             self._ball_was_moving[bid] = False
             pos = self._ball_positions.get(bid)
             if pos is not None:
-                self.tracker.seed_position(bid, pos)
+                self.tracker.seed_position(bid, pos, hold=True)
 
     def _current_strokes(self, pid: str) -> int:
         sc = self.player_scores.get(pid, [])
@@ -2459,7 +2504,10 @@ class GameEngine:
             "lost_balls": self._lost_ball_snapshot(),
             "awaiting_tee": bool(not self._shot_armed),
             "in_start": bool(self._in_start_zone(pos)),
-            "ball_seen": bool(tb is not None and tb.position is not None and not tb.lost),
+            "ball_seen": bool(
+                tb is not None and tb.position is not None
+                and (not tb.lost or getattr(tb, "held", False))
+            ),
         }
 
     def _ball_motion_status(self) -> dict:
@@ -2737,31 +2785,46 @@ class GameEngine:
         for i, p in enumerate(self.players):
             ball_id = self.ball_for_player.get(p.id, f"ball{i}")
             pos = self._ball_positions.get(ball_id)
+            tb = self.tracker.balls.get(ball_id)
+            if pos is None and tb is not None and tb.smoothed is not None:
+                pos = tb.smoothed
             if pos is None:
                 continue
             u, v = self.mapper.floor_to_pixel(*pos)
             x, y = u / self._feed_w, v / self._feed_h
             rejected = ball_id in self._rejected_balls
             selected = st == S.CAL_BALLS and i == self._selected_setup_player
+            active = st == S.PLAY and ball_id == self._active_ball_id()
+            held = bool(tb is not None and getattr(tb, "held", False))
             label = f"{i + 1} · {p.hue_name or 'ball'} · {p.name}"
             if rejected:
                 label = "Too close to the cup color — swap it"
-            if st == S.CAL_BALLS:
+            if active and not self._shot_armed:
+                label = "Ball — click if this is wrong"
+            if st == S.CAL_BALLS or active:
                 o["shapes"].append({
                     "type": "circle", "x": x, "y": y,
-                    "r": 0.038 if selected else 0.03,
+                    "r": 0.042 if active else (0.038 if selected else 0.03),
                     "fill": "none",
-                    "stroke": "#8be9c3" if selected else p.color,
-                    "stroke_width": 6 if selected else 4,
+                    "stroke": "#8be9c3" if (selected or active) else p.color,
+                    "stroke_width": 6 if (selected or active) else 4,
+                    "dash": "8 6" if (active and held) else "",
                     "id": f"ballring_{p.id}",
                 })
             o["shapes"].append({
                 "type": "circle", "x": x, "y": y,
-                "r": 0.016 if selected else 0.013,
+                "r": 0.02 if active else (0.016 if selected else 0.013),
                 "fill": p.color,
                 "stroke": "#ff6b57" if rejected else "#15171c",
                 "stroke_width": 3,
                 "label": label, "id": f"ball_{p.id}",
+            })
+        if self._tee_click and time.time() < self._tee_click[2]:
+            o["shapes"].append({
+                "type": "circle", "x": self._tee_click[0], "y": self._tee_click[1],
+                "r": 0.034, "fill": "none", "stroke": "#8be9c3",
+                "stroke_width": 5, "dash": "6 5", "label": "Locked",
+                "id": "tee_click",
             })
         return o
 

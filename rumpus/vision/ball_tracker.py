@@ -31,6 +31,7 @@ class TrackedBall:
         self.hidden = False
         self.hidden_estimate: tuple[float, float] | None = None
         self.lost = False
+        self.held = False
         self.last_seen_t = -np.inf
         self._heading: tuple[float, float] = (0.0, 0.0)
 
@@ -59,9 +60,11 @@ class BallTracker:
             b.hidden = False
             b.hidden_estimate = None
             b.lost = False
+            b.held = False
             b.last_seen_t = -np.inf
 
-    def seed_position(self, ball_id: str, pos: tuple[float, float], now: float | None = None) -> None:
+    def seed_position(self, ball_id: str, pos: tuple[float, float], now: float | None = None,
+                      hold: bool = True) -> None:
         ball = self.balls.get(ball_id)
         if ball is None or pos is None:
             return
@@ -75,6 +78,7 @@ class BallTracker:
         ball.hidden = False
         ball.hidden_estimate = None
         ball.lost = False
+        ball.held = bool(hold)
 
     # ------------------------------------------------------------------ #
     def update(self, color_bgr, depth_mm, mapper: FloorMapper, cam: CameraModel,
@@ -116,57 +120,124 @@ class BallTracker:
         return out
 
     def _detect_color(self, color_bgr, mapper, play_area=None) -> list[dict]:
-        """Color-only detection: per-ball hue mask inside the play area.
+        """Color-only detection: per-ball hue mask, preferring the last spot.
 
-        Prefer the blob nearest the last known position so a lamp or sock
-        outside the last putt does not steal the track.
+        Living-room lighting is dimmer than the setup click, so the play
+        masks are looser than the S09 auto-scan. A held/clicked tee is not
+        stolen by a lamp across the room.
         """
         out: list[dict] = []
-        if color_bgr is None:
+        if color_bgr is None or mapper is None:
             return out
         hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
-        h = hsv[..., 0]
-        s = hsv[..., 1]
-        v = hsv[..., 2]
         for ball in self.balls.values():
-            if ball.hue_range is None:
-                # White ball: bright and almost no saturation (not beige carpet).
-                mask = ((s < 32) & (v > 205)).astype(np.uint8) * 255
-            else:
-                lo, hi = ball.hue_range
-                mask = self._hue_mask(h, s, lo, hi)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            candidates: list[tuple[float, float, tuple[float, float]]] = []
-            for c in cnts:
-                area = float(cv2.contourArea(c))
-                if area < 20.0:
-                    continue
-                m = cv2.moments(c)
-                if m["m00"] == 0:
-                    continue
-                cx = m["m10"] / m["m00"]
-                cy = m["m01"] / m["m00"]
-                f = mapper.pixel_to_floor(float(cx), float(cy))
-                if f is None:
-                    continue
-                fx, fy = float(f[0]), float(f[1])
-                if play_area and not _point_in_poly(fx, fy, play_area):
-                    continue
-                if ball.position is not None:
-                    dist = float(np.hypot(fx - ball.position[0], fy - ball.position[1]))
-                else:
-                    dist = 0.0
-                candidates.append((dist, -area, (fx, fy)))
-            if not candidates:
-                continue
-            candidates.sort()
-            out.append({"ball_id": ball.id, "pos": candidates[0][2]})
+            pos = self._best_color_blob(ball, hsv, mapper, play_area)
+            if pos is None:
+                pos = self._centroid_near_last(ball, hsv, mapper, color_bgr)
+            if pos is not None:
+                out.append({"ball_id": ball.id, "pos": pos})
         return out
 
-    def _hue_mask(self, h: np.ndarray, s: np.ndarray, lo: int, hi: int) -> np.ndarray:
-        """Binary mask of pixels whose hue is in [lo, hi] (circular) & neon-saturated."""
-        sat = s > 110
+    def find_near_pixel(self, ball_id: str, color_bgr, mapper, nx: float, ny: float,
+                        play_area=None) -> tuple[float, float] | None:
+        """Return the matching blob nearest a normalized click, if any."""
+        ball = self.balls.get(ball_id)
+        if ball is None or color_bgr is None or mapper is None:
+            return None
+        hh, ww = color_bgr.shape[:2]
+        hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+        mask = self._ball_mask(ball, hsv)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        click = (float(nx) * ww, float(ny) * hh)
+        best = None
+        best_d = 0.12 * max(ww, hh)
+        for c in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+            area = float(cv2.contourArea(c))
+            if area < 6.0:
+                continue
+            m = cv2.moments(c)
+            if m["m00"] == 0:
+                continue
+            cx, cy = m["m10"] / m["m00"], m["m01"] / m["m00"]
+            d = float(np.hypot(cx - click[0], cy - click[1]))
+            if d >= best_d:
+                continue
+            f = mapper.pixel_to_floor(float(cx), float(cy))
+            if f is None:
+                continue
+            best_d = d
+            best = (float(f[0]), float(f[1]))
+        return best
+
+    def _best_color_blob(self, ball: TrackedBall, hsv, mapper, play_area=None):
+        mask = self._ball_mask(ball, hsv)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        candidates: list[tuple[float, float, float, tuple[float, float]]] = []
+        for c in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+            area = float(cv2.contourArea(c))
+            if area < 6.0:
+                continue
+            m = cv2.moments(c)
+            if m["m00"] == 0:
+                continue
+            cx = m["m10"] / m["m00"]
+            cy = m["m01"] / m["m00"]
+            f = mapper.pixel_to_floor(float(cx), float(cy))
+            if f is None:
+                continue
+            fx, fy = float(f[0]), float(f[1])
+            inside = 0.0 if (not play_area or _point_in_poly(fx, fy, play_area)) else 1.0
+            if ball.position is not None:
+                dist = float(np.hypot(fx - ball.position[0], fy - ball.position[1]))
+            else:
+                dist = 0.0
+            if ball.held and ball.position is not None and dist > 0.55:
+                continue
+            if play_area and inside == 1.0 and ball.position is None:
+                continue
+            candidates.append((inside, dist, -area, (fx, fy)))
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[0][3]
+
+    def _centroid_near_last(self, ball: TrackedBall, hsv, mapper, color_bgr):
+        """Fallback: average matching pixels in a window around the last pose."""
+        if ball.smoothed is None or mapper is None:
+            return None
+        u, v = mapper.floor_to_pixel(ball.smoothed[0], ball.smoothed[1])
+        hh, ww = hsv.shape[:2]
+        rad = max(28, int(0.06 * max(ww, hh)))
+        x0, x1 = max(0, int(u) - rad), min(ww, int(u) + rad)
+        y0, y1 = max(0, int(v) - rad), min(hh, int(v) + rad)
+        if x1 - x0 < 4 or y1 - y0 < 4:
+            return None
+        patch = hsv[y0:y1, x0:x1]
+        mask = self._ball_mask(ball, patch)
+        ys, xs = np.where(mask > 0)
+        if len(xs) < 8:
+            return None
+        cx = float(xs.mean() + x0)
+        cy = float(ys.mean() + y0)
+        f = mapper.pixel_to_floor(cx, cy)
+        if f is None:
+            return None
+        return (float(f[0]), float(f[1]))
+
+    def _ball_mask(self, ball: TrackedBall, hsv: np.ndarray) -> np.ndarray:
+        h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        if ball.hue_range is None:
+            return ((s < 58) & (v > 150)).astype(np.uint8) * 255
+        lo, hi = ball.hue_range
+        return self._hue_mask(h, s, lo, hi, sat_min=70, val=v, val_min=80)
+
+    def _hue_mask(self, h: np.ndarray, s: np.ndarray, lo: int, hi: int,
+                  sat_min: int = 110, val: np.ndarray | None = None,
+                  val_min: int = 0) -> np.ndarray:
+        """Binary mask of pixels whose hue is in [lo, hi] (circular)."""
+        sat = s > sat_min
+        if val is not None and val_min > 0:
+            sat = sat & (val > val_min)
         if lo <= hi:
             m = (h >= lo) & (h <= hi) & sat
         else:  # wraps across the 0/180 boundary (e.g. red/pink)
@@ -238,6 +309,8 @@ class BallTracker:
             if ball.position is not None:
                 pd = float(np.hypot(d["pos"][0] - ball.position[0],
                                     d["pos"][1] - ball.position[1]))
+                if ball.held and pd > 0.55:
+                    continue
                 if pd > 0.5 and (now - ball.last_seen_t) < 1.0:
                     continue
             self._accept(ball, d["pos"], now)
@@ -265,12 +338,12 @@ class BallTracker:
             # Moving/stopped over a 0.5 s window.
             cutoff = now - 0.5
             recent = [(x, y) for (t, x, y) in ball.history if t >= cutoff]
+            moved = False
             if len(recent) >= 2:
                 x0, y0 = recent[0]
                 x1, y1 = recent[-1]
-                ball.moving = bool(np.hypot(x1 - x0, y1 - y0) >= 0.02)
-            else:
-                ball.moving = False
+                moved = bool(np.hypot(x1 - x0, y1 - y0) >= 0.02)
+            ball.moving = moved
 
             # Occlusion: heading leads into a confirmed obstacle & not seen.
             unseen = now - ball.last_seen_t
@@ -286,8 +359,17 @@ class BallTracker:
             if ball.hidden and ball.position is not None:
                 pass  # re-acquisition happens via _match (nearby hue blob).
 
-            # Lost: > 2 s unseen and not hidden behind an obstacle.
-            ball.lost = bool((unseen > 2.0) and not ball.hidden)
+            # A clicked / confirmed tee stays visible. Release the pin when
+            # the ball actually rolls so strokes still count.
+            if ball.held and ball.position is not None:
+                if moved:
+                    ball.held = False
+                    ball.lost = False
+                else:
+                    ball.lost = False
+                    ball.moving = False
+            else:
+                ball.lost = bool((unseen > 2.0) and not ball.hidden)
 
     def _heading_intersects(self, pos, heading, obstacles):
         hx, hy = heading
