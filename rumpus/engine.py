@@ -2785,22 +2785,24 @@ class GameEngine:
                     "fill": "#8be9c3", "stroke": "#15171c", "stroke_width": 3,
                     "label": "size", "id": "corner0",
                 })
-        # Obstacles.
-        for ob in self.setup.obstacles:
-            if ob.state == "deleted":
-                style = {"stroke": "#ff6b57", "stroke_width": 3, "dash": "6 8", "opacity": 0.35}
-            elif ob.state in ("proposed",):
-                low = ob.confidence < 0.7
-                style = {"stroke": "#ff6b57" if low else "#8be9c3", "stroke_width": 4,
-                         "dash": "16 10", "fill": "rgba(255,107,87,0.14)" if low else "rgba(139,233,195,0.12)"}
-            elif ob.state == "selected":
-                style = {"stroke": "#8be9c3", "stroke_width": 5, "fill": "rgba(139,233,195,0.16)"}
-            elif ob.state == "drawing":
-                style = {"stroke": "#f2efe8", "stroke_width": 3, "dash": "12 10"}
-            else:  # confirmed
-                style = {"stroke": "#f2efe8", "stroke_width": 3, "fill": "rgba(242,239,232,0.08)"}
-            o["shapes"].append({"type": "polygon", "pts": self._floor_poly_norm(ob.polygon),
-                                "id": f"obstacle_{ob.id}", "label": ob.label, **style})
+        # Obstacles: only while placing / verifying / recalibrating. During
+        # play the physical blocks are on the floor — extra outlines just clutter.
+        if st not in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB, S.GAME_START):
+            for ob in self.setup.obstacles:
+                if ob.state == "deleted":
+                    style = {"stroke": "#ff6b57", "stroke_width": 3, "dash": "6 8", "opacity": 0.35}
+                elif ob.state in ("proposed",):
+                    low = ob.confidence < 0.7
+                    style = {"stroke": "#ff6b57" if low else "#8be9c3", "stroke_width": 4,
+                             "dash": "16 10", "fill": "rgba(255,107,87,0.14)" if low else "rgba(139,233,195,0.12)"}
+                elif ob.state == "selected":
+                    style = {"stroke": "#8be9c3", "stroke_width": 5, "fill": "rgba(139,233,195,0.16)"}
+                elif ob.state == "drawing":
+                    style = {"stroke": "#f2efe8", "stroke_width": 3, "dash": "12 10"}
+                else:  # confirmed
+                    style = {"stroke": "#f2efe8", "stroke_width": 3, "fill": "rgba(242,239,232,0.08)"}
+                o["shapes"].append({"type": "polygon", "pts": self._floor_poly_norm(ob.polygon),
+                                    "id": f"obstacle_{ob.id}", "label": ob.label, **style})
         # Balls + trail.
         if st == S.CAL_BALLS and not self.players:
             o["shapes"].append({
