@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
     "controller": {"rumble": True},
     "display": {"showCameraFeed": True, "debugOverlay": False},
     "camera": {"device": 0, "resolution": "1280x720", "backend": "auto",
-               "exposure": -6},
+               "exposure": -6, "negotiated": None},
     "rules": {"holes": 3, "strokeCap": 8, "oobPenalty": True, "tunnelBonus": True},
 }
 

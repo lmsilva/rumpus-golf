@@ -296,6 +296,7 @@ class GameEngine:
         backend, _kind = create_backend(
             force=None, allow_mock=False,
             camera_index=index, camera_res=res, backend_mode=mode,
+            settings=self.settings,
         )
 
         self.plane = None
@@ -327,7 +328,7 @@ class GameEngine:
     # Main loop
     # ===================================================================== #
     def tick(self, frame) -> None:
-        now = time.time()
+        now = float(getattr(frame, "t", 0) or 0) or time.time()
         dt = now - self._last_t
         self._last_t = now
 
@@ -1719,6 +1720,12 @@ class GameEngine:
             self.rescan_cameras()
         elif action == "apply_camera":
             self._reconfigure_camera()
+        elif action == "driver_settings":
+            if self.backend is not None:
+                try:
+                    self.backend.open_driver_settings()
+                except Exception:
+                    pass
 
     def _holecomplete_action(self, action: str) -> None:
         if action == "confirm":
@@ -2818,23 +2825,39 @@ class GameEngine:
             except Exception:
                 status = {}
         ignored = list(status.get("ignored") or [])
+        exposure_ok = status.get("exposure_control", True)
         notice = ""
-        if ignored:
+        if exposure_ok is False:
+            notice = (
+                "This camera controls its own exposure. Bright, even room light "
+                "keeps tracking fast; dim rooms will slow it down."
+            )
+        elif ignored:
             notice = ("This driver ignored: "
                       + ", ".join(ignored)
                       + ". Exposure lock may not stick on this camera.")
         fps = status.get("measured_fps")
         if fps is None and self.backend is not None:
             fps = getattr(self.backend.description, "fps", None)
+        actual = None
+        if self.backend is not None and getattr(self.backend, "description", None):
+            cr = self.backend.description.color_res
+            if cr:
+                actual = f"{cr[0]}x{cr[1]}"
         return {
             "devices": self._camera_list,
             "scanning": not self._camera_scan_done,
             "active_device": int(cfg.get("device", 0)),
             "resolution": str(cfg.get("resolution", "1280x720")),
+            "actual_resolution": actual or status.get("negotiated_resolution"),
             "backend": str(cfg.get("backend", "auto")),
+            "capture_api": status.get("capture_api") or "",
+            "fourcc": status.get("fourcc") or "",
             "exposure": float(cfg.get("exposure", -6)),
             "measured_fps": None if fps is None else float(fps),
             "lock_notice": notice,
+            "exposure_control": exposure_ok is not False,
+            "show_driver_settings": bool(status.get("show_driver_settings")),
             "locked": bool(status.get("locked")),
             "is_color_only": self.is_color_only,
             "is_mock": self.is_mock,

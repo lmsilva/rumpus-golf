@@ -64,6 +64,10 @@ class SensorBackend(ABC):
     def set_exposure(self, value: float) -> None:
         """Set a fixed exposure (webcam log2 seconds). No-op on other backends."""
 
+    def open_driver_settings(self) -> bool:
+        """Open the OS camera property dialog. Webcam / Windows only."""
+        return False
+
     def capture_status(self) -> dict:
         """Lock / fps facts for the Settings camera tab."""
         return {
@@ -71,4 +75,6 @@ class SensorBackend(ABC):
             "locked": False,
             "exposure": None,
             "ignored": [],
+            "exposure_control": True,
+            "show_driver_settings": False,
         }

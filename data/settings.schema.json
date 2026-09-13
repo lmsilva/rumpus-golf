@@ -108,6 +108,24 @@
           "minimum": -8,
           "maximum": -4,
           "default": -6
+        },
+        "negotiated": {
+          "description": "Cached webcam capture that last measured ≥ 25 fps.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "default": null,
+          "properties": {
+            "device": { "type": "integer" },
+            "want": { "type": "string" },
+            "api": { "type": "string" },
+            "order": { "type": "string" },
+            "resolution": { "type": "string" },
+            "fourcc": { "type": "string" },
+            "fps": { "type": "number" },
+            "ok": { "type": "boolean" }
+          }
         }
       }
     },

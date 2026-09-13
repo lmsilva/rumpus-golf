@@ -60,6 +60,8 @@ class SensorDescription:
     reliable_max_m: float
     note: str = ""
     fps: float = 30.0
+    exposure_control: bool = True
+    fourcc: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

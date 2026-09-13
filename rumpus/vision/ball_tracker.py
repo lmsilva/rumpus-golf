@@ -336,7 +336,12 @@ class BallTracker:
                 })
 
     def gate_radius(self, ball: TrackedBall, now: float) -> float:
-        """Meters from last pose that a new detection may land in."""
+        """Meters from last pose that a new detection may land in.
+
+        Uses the real time since the last accepted frame (``now`` is the
+        grab timestamp), not an assumed 30 fps. Slow cameras get a wider
+        gate so a putt does not freeze then teleport.
+        """
         if ball.held:
             return 0.55
         if ball.position is None or not np.isfinite(ball.last_seen_t):
@@ -386,7 +391,7 @@ class BallTracker:
     # -- motion / hidden / lost ------------------------------------------- #
     def _update_motion(self, now, cam, confirmed_obstacles, mapper) -> None:
         for ball in self.balls.values():
-            # Moving/stopped over a 0.5 s window.
+            # Moving/stopped over a real 0.5 s of grab timestamps, not N frames.
             cutoff = now - 0.5
             recent = [(x, y) for (t, x, y) in ball.history if t >= cutoff]
             moved = False

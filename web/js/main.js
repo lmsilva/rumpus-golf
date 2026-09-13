@@ -114,7 +114,8 @@ window.RG = window.RG || {};
       s.rules && s.rules.holes, s.rules && s.rules.strokeCap, s.rules && s.rules.oobPenalty, s.rules && s.rules.tunnelBonus,
       cam.active_device, cam.resolution, cam.backend, names,
       cam.is_mock, cam.error, st.sensor && st.sensor.model,
-      cam.lock_notice, cam.locked,
+      cam.lock_notice, cam.locked, cam.exposure_control, cam.show_driver_settings,
+      cam.fourcc, cam.capture_api, cam.actual_resolution, cam.measured_fps,
       s.display && s.display.debugOverlay,
     ].join("|");
   }

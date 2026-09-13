@@ -17,6 +17,7 @@ def create_backend(
     camera_index: int = 0,
     camera_res: str = "1280x720",
     backend_mode: str = "auto",
+    settings=None,
 ) -> tuple[SensorBackend | None, str]:
     """Return ``(backend, status)``.
 
@@ -31,7 +32,7 @@ def create_backend(
         return (b, "mock") if b.open() else (None, "none")
     if force == "webcam":
         from .webcam import WebcamBackend
-        b = WebcamBackend(camera_index, camera_res)
+        b = WebcamBackend(camera_index, camera_res, settings=settings)
         return (b, "webcam") if b.open() else (None, "none")
     if force in ("v1", "v2"):
         b = _try_open(force)
@@ -57,7 +58,7 @@ def create_backend(
     # Regular 2D webcam (color-only).
     if backend_mode in ("auto", "webcam"):
         from .webcam import WebcamBackend
-        b = WebcamBackend(camera_index, camera_res)
+        b = WebcamBackend(camera_index, camera_res, settings=settings)
         if b.open():
             return b, "webcam"
         # The user asked for a webcam — do not silently substitute the mock.

@@ -105,7 +105,7 @@ S.S01 = function (st) {
 };
 
 S.S02 = function (st) {
-  const d = st.ui && st.ui.sensor;
+  const d = st.sensor || (st.ui && st.ui.sensor);
   const facts = d ? [
     ["Depth", `${d.depth_res[0]} × ${d.depth_res[1]}`],
     ["Color", `${d.color_res[0]} × ${d.color_res[1]}`],
@@ -114,6 +114,9 @@ S.S02 = function (st) {
     ["Note", d.note || ""],
   ] : [];
   const noSensor = !d;
+  const expNotice = d && d.exposure_control === false
+    ? `<div class="warn-banner" style="margin-top:28px">This camera controls its own exposure. Bright, even room light keeps tracking fast; dim rooms will slow it down.</div>`
+    : "";
   return `
   ${topbar("New game")}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px;height:calc(100% - 96px)">
@@ -122,7 +125,7 @@ S.S02 = function (st) {
       <h2 style="font-size:80px;letter-spacing:-.035em;margin:14px 0 36px">${noSensor ? "No camera" : esc(d.model)}<br>found.</h2>
       ${noSensor ? "" : `<div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 var(--font-body)">
              ${facts.map(([k, v]) => `<span class="text-muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}
-           </div>`}
+           </div>${expNotice}`}
       ${noSensor ? `<div style="margin-top:auto;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.4);border-radius:18px;padding:24px 28px;display:flex;gap:18px">
              <span class="dot" style="width:12px;height:12px;background:var(--coral);margin-top:10px"></span>
              <div><div style="font:700 22px var(--font-display)">Error state — no sensor</div>
@@ -156,7 +159,7 @@ S.S03 = function (st) {
     <h2 style="font-size:60px;margin:10px 0 16px">Do the lines still sit on the floor?</h2>
     <div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">White = play area, start and the obstacles you confirmed. Mint = hole. If only something moved, Recalibrate lets you redo just that — cup, obstacles or zones.</div>
   </div>
-  <div class="pill" style="position:absolute;right:56px;top:56px;z-index:3">LIVE · ${(st.feed && st.feed.w) || 0} × ${(st.feed && st.feed.h) || 0} · 30 fps</div>
+  <div style="position:absolute;right:56px;top:56px;z-index:3">${livePill(st)}</div>
   <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
     <button class="btn primary" data-action="confirm" style="min-width:400px"><span>Looks right</span>${RG.btnHint("confirm")}</button>
     <button class="btn glass" data-action="recalibrate" style="min-width:400px"><span>Recalibrate</span>${RG.btnHint("undo")}</button>
@@ -896,11 +899,15 @@ S.S19 = function (st) {
     : settingsCard("Players", "No players yet", `<div style="font:400 17px var(--font-body);color:var(--text-muted);margin-top:8px">Players are created during setup when you put colored balls on the floor (step 5).</div>`);
 
   const measuredFps = cam.measured_fps != null ? cam.measured_fps : (sensor && sensor.fps);
+  const apiNames = { dshow: "DirectShow", msmf: "Media Foundation" };
   const facts = sensor ? [
     ["In use", sensor.model],
     ["Color", `${sensor.color_res[0]} × ${sensor.color_res[1]}`],
     ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "— (color only)"],
+    ["FOURCC", cam.fourcc || sensor.fourcc || "—"],
+    ["Capture", apiNames[cam.capture_api] || cam.capture_api || "—"],
     ["Measured fps", measuredFps != null ? `${Number(measuredFps).toFixed(1)} fps` : "—"],
+    ["Exposure", cam.exposure_control === false ? "Camera-controlled" : "Programmable"],
     ["Field of view", `${sensor.fov_h_deg}°`],
     ["Reliable range", `${sensor.reliable_min_m} – ${sensor.reliable_max_m} m`],
     ["Note", sensor.note || ""],
@@ -916,6 +923,14 @@ S.S19 = function (st) {
   const lockNotice = cam.lock_notice ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.lock_notice)}</div>` : "";
   const exp = cam.exposure != null ? cam.exposure : ((s.camera && s.camera.exposure) != null ? s.camera.exposure : -6);
   const debugOn = !!(s.display && s.display.debugOverlay);
+  const driverBtn = cam.show_driver_settings
+    ? `<div style="margin-top:16px">
+        <button type="button" class="btn secondary sm" data-action="driver_settings"><span>Open driver settings</span></button>
+        <div class="s-card-desc" style="margin-top:10px">Turn off auto exposure and low-light compensation in the camera’s own dialog. Logitech drivers remember this across sessions.</div>
+      </div>`
+    : "";
+  const resChoices = ["1920x1080", "1280x720", "960x540", "800x600", "640x480"];
+  if (cam.resolution && !resChoices.includes(cam.resolution)) resChoices.unshift(cam.resolution);
   const cameraTab = `
     ${mockWarn}${err}${lockNotice}
     ${settingsCard("Live preview", "What this camera sees right now", `<div class="feed-slot" data-feed-slot style="margin-top:14px;aspect-ratio:16/9;border-radius:16px"></div>`)}
@@ -923,9 +938,9 @@ S.S19 = function (st) {
     ${settingsCard("Exposure", "Shorter (more negative) keeps a rolling ball sharp. Default −6 is about 1/64 s.", `
       <div class="s-inline" style="margin-top:14px">
         <span class="text-muted" style="width:120px">Exposure</span>
-        <input class="slider grow" type="range" min="-8" max="-4" step="1" value="${exp}" data-set-camera-exposure>
+        <input class="slider grow" type="range" min="-8" max="-4" step="1" value="${exp}" data-set-camera-exposure ${cam.exposure_control === false ? "disabled" : ""}>
         <span data-exposure-label style="font:700 18px var(--font-display);width:56px;text-align:right">${exp}</span>
-      </div>`)}
+      </div>${driverBtn}`)}
     <div class="s-card s-inline">
       <div class="grow"><div style="font:700 20px var(--font-display)">Tracking debug overlay</div><div class="s-card-desc">Draws fps, ball masks, accepted / rejected detections, and the gate radius on the live feed.</div></div>
       <button type="button" class="toggle ${debugOn ? "on" : ""}" data-set-debug-overlay><span class="knob"></span></button>
@@ -938,7 +953,7 @@ S.S19 = function (st) {
             : `<span class="text-muted" style="font:400 17px var(--font-body)">${cam.scanning ? "Scanning for cameras…" : "No cameras found"}</span>`}
         </div>
         <div class="s-form-row"><label>Resolution</label>
-          <select class="select grow" data-set-camera-resolution>${["640x480", "1280x720", "1920x1080"].map((r) => `<option value="${r}" ${r === cam.resolution ? "selected" : ""}>${r}</option>`).join("")}</select>
+          <select class="select grow" data-set-camera-resolution>${resChoices.map((r) => `<option value="${r}" ${r === cam.resolution ? "selected" : ""}>${r}${cam.actual_resolution && cam.actual_resolution !== r && r === cam.resolution ? ` (using ${cam.actual_resolution})` : ""}</option>`).join("")}</select>
         </div>
         <div class="s-form-row"><label>Backend</label>
           <select class="select grow" data-set-camera-backend>${[["auto", "Auto (Kinect → webcam → mock)"], ["webcam", "Webcam (2D)"], ["kinect", "Kinect only"]].map(([v, l]) => `<option value="${v}" ${v === cam.backend ? "selected" : ""}>${l}</option>`).join("")}</select>

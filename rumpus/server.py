@@ -141,6 +141,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
         backend, _kind = create_backend(
             force=force_sensor, allow_mock=use_mock,
             camera_index=idx, camera_res=res, backend_mode=mode,
+            settings=engine.settings,
         )
         if backend is None:
             engine.sensor_status = "none"
