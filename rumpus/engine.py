@@ -465,8 +465,7 @@ class GameEngine:
         elif st == S.SETTINGS:
             self._settings_action(action, msg)
         elif st in (S.CREDITS, S.CHANGELOG):
-            if action == "back":
-                self._set_state(S.SETTINGS)
+            pass  # only "back" is meaningful here, handled via _on_back
 
     # ------------------------------------------------------------------ #
     def _on_back(self) -> None:
@@ -487,10 +486,16 @@ class GameEngine:
             self._set_state(S.CAL_OBSTACLES)
         elif st == S.CAL_BALLS:
             self._set_state(S.CAL_CUP)
+        elif st == S.GAME_START:
+            self._set_state(S.CAL_BALLS)
         elif st == S.PAUSE:
             self._set_state(self._prev_state_for_pause)
-        elif st in (S.SETTINGS,):
-            self._set_state(self._settings_return)
+        elif st == S.FIX_SCORE:
+            self._set_state(S.PAUSE)
+        elif st == S.SENSOR_CHECK:
+            self._set_state(S.BOOT)
+        elif st in (S.SETTINGS, S.CREDITS, S.CHANGELOG):
+            self._set_state(S.SETTINGS if st in (S.CREDITS, S.CHANGELOG) else self._settings_return)
 
     # ===================================================================== #
     # Per-screen actions
