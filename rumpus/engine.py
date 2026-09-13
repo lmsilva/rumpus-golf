@@ -27,7 +27,7 @@ from .models import (CircleZone, EventType, FloorPlane, Obstacle, Palette, Playe
                      SensorDescription)
 from .sensor.base import SensorBackend
 from .sensor.mock import MockBackend, hex_to_bgr
-from .setup_data import Setup
+from .setup_data import Setup, load_reference_color, save_reference_color
 from .vision.ball_tracker import (
     BallTracker, detect_setup_balls, hue_clash_pairs, nearest_setup_ball,
     sample_ball_at_pixel,
@@ -99,6 +99,14 @@ IN_GAME_STATES = PLAYABLE_ROUND
 
 HUE_NAMES = Palette.HUE_NAMES
 PLAYER_COLORS = Palette.PLAYER_COLORS
+
+# A backend hands back its last good frame when a grab fails, so a frame
+# timestamp this old means the stream is dead rather than merely slow.
+FEED_STALE_S = 2.5
+FEED_STALE_MSG = (
+    "The camera stopped sending pictures. Check the cable, then use "
+    "Settings → Camera → Apply camera to reconnect."
+)
 
 
 class GameEngine:
@@ -225,12 +233,19 @@ class GameEngine:
         self._recal_return: str | None = None
         self._recal_single = False
         self._rebuilding = False
+        # Net stroke change per player while the Fix score screen is open.
+        self._fix_score_delta: dict[str, int] = {}
         self._last_ball_scan = 0.0
         self._rejected_balls: set[str] = set()
         self._dismissed_hues: set[str] = set()
         self._selected_setup_player: int | None = None
 
         self._last_t = time.time()
+
+        # Dead-stream detection (see _note_frame_freshness).
+        self._frame_stamp = 0.0
+        self._frame_fresh_at = 0.0
+        self._feed_stale = False
 
     # ===================================================================== #
     # Startup
@@ -248,6 +263,9 @@ class GameEngine:
         self._feed_h = backend.description.color_res[1]
         self.sensor_status = backend.description.model
         self._camera_error = ""
+        self._frame_stamp = 0.0
+        self._frame_fresh_at = 0.0
+        self._feed_stale = False
 
     @property
     def is_mock(self) -> bool:
@@ -309,6 +327,7 @@ class GameEngine:
             settings=self.settings,
         )
 
+        # The live calibration belongs to the device we just closed.
         self.plane = None
         self.mapper = None
         self.reference_depth = None
@@ -331,6 +350,10 @@ class GameEngine:
         self._apply_saved_exposure()
         if self.state not in CAL_STATES:
             self._lock_capture()
+        # Put the saved floor mapping back so a mid-round camera change does not
+        # leave tracking dead until the user recalibrates by hand.
+        self._restore_floor_mapping()
+        self._seed_tracker_from_positions()
         self._camera_error = ""
         return True
 
@@ -347,15 +370,42 @@ class GameEngine:
         if self._frame_color is not None:
             self._feed_h, self._feed_w = self._frame_color.shape[:2]
 
+        stale = self._note_frame_freshness(frame)
+
         # Keep the mock scene in sync with the model.
         if self.is_mock:
             self._sync_mock_scene()
 
-        # Feed-state vision & game processing.
-        if self.state in FEED_STATES:
+        # Feed-state vision & game processing. A dead stream keeps handing back
+        # the last good frame, so tracking it would invent strokes and rests.
+        if self.state in FEED_STATES and not stale:
             self._process_vision(now)
 
         self._process_timers(now)
+
+    def _note_frame_freshness(self, frame) -> bool:
+        """Track whether the camera is still delivering, and say so if not.
+
+        Every backend returns its last good frame (timestamp included) when a
+        grab fails, so a timestamp that stops advancing means the stream died.
+        """
+        wall = time.time()
+        stamp = float(getattr(frame, "t", 0) or 0)
+        if frame.color is not None and stamp != self._frame_stamp:
+            self._frame_stamp = stamp
+            self._frame_fresh_at = wall
+            if self._feed_stale:
+                self._feed_stale = False
+                if self._camera_error == FEED_STALE_MSG:
+                    self._camera_error = ""
+            return False
+        if self._frame_fresh_at and wall - self._frame_fresh_at > FEED_STALE_S:
+            if not self._feed_stale:
+                self._feed_stale = True
+                if not self._camera_error:
+                    self._camera_error = FEED_STALE_MSG
+            return True
+        return self._feed_stale
 
     def _process_vision(self, now: float) -> None:
         if self.is_color_only:
@@ -608,6 +658,7 @@ class GameEngine:
                     self._set_state(S.PLAY)
         elif st == S.OOB:
             if action == "confirm":
+                self._replace_oob_ball()
                 self._advance_turn()
             elif action == "secondary":
                 self._start_recal("balls")
@@ -632,6 +683,17 @@ class GameEngine:
             S.CAL_OBSTACLES, S.CAL_CUP, S.CAL_BALLS, S.VERIFY,
         ):
             self._finish_recal()
+            return
+        # Rebuilding a later hole walks the same calibration screens. Back must
+        # stay inside the rebuild instead of dropping into the first-run wizard,
+        # where confirming would overwrite the play area mid-round.
+        if self._rebuilding and not self._recal_return:
+            if st == S.CAL_OBSTACLES:
+                self._set_state(S.HOLE_START)
+            elif st == S.CAL_CUP:
+                self._set_state(S.CAL_OBSTACLES)
+            else:
+                self._enter_pause()
             return
         if st in (S.CAL_FLOOR,):
             self._capture_until = 0.0
@@ -658,6 +720,10 @@ class GameEngine:
             self._set_state(S.CAL_BALLS)
         elif st == S.HOLE_COMPLETE:
             self._enter_pause()
+        elif st == S.GAME_FINISH:
+            # End of the night: Back closes it out rather than doing nothing.
+            self._end_round()
+            self._set_state(S.BOOT)
         elif st == S.PAUSE:
             self._set_state(self._pause_resume_dest())
         elif st == S.FIX_SCORE:
@@ -1239,11 +1305,11 @@ class GameEngine:
 
     def _obstacles_done(self) -> None:
         # After the course/obstacles are confirmed: return from a mid-game
-        # recal, resume play on a rebuild (holes 2+), or continue to the cup.
+        # recal, or continue to the cup. Holes 2+ move the cup too, so a rebuild
+        # also goes through it — jumping straight to play left every later hole
+        # using hole 1's cup, where no putt could ever register as holed.
         if self._recal_return and self._recal_single:
             self._finish_recal()
-        elif self._rebuilding and not self._recal_return:
-            self._set_state(S.PLAY)
         else:
             self._set_state(S.CAL_CUP)
 
@@ -1357,6 +1423,9 @@ class GameEngine:
                 return
             if self._recal_return and self._recal_single:
                 self._finish_recal()
+            elif self._rebuilding and not self._recal_return:
+                # Rebuilding a later hole: balls are already assigned.
+                self._resume_rebuilt_hole()
             else:
                 self._set_state(S.CAL_BALLS)
         elif action == "redetect" or action == "undo":
@@ -1375,6 +1444,13 @@ class GameEngine:
             self._nudge_cup_r(0.008)
         elif action == "shrink":
             self._nudge_cup_r(-0.008)
+
+    def _resume_rebuilt_hole(self) -> None:
+        """Tee off on a rebuilt hole (2+) once objects and the cup are set."""
+        self._rebuilding = False
+        self._seed_tracker_from_positions()
+        self._sync_shot_arm()
+        self._set_state(S.PLAY)
 
     def _nudge_cup_r(self, delta: float) -> None:
         self._ensure_cup()
@@ -1599,7 +1675,8 @@ class GameEngine:
         if hit is not None:
             self._offer_setup_ball(hit, manual=True)
             return
-        swatch = sample_ball_at_pixel(self._frame_color, float(ix), float(iy))
+        swatch = sample_ball_at_pixel(
+            self._frame_color, float(ix), float(iy), self._ball_radius_px(floor))
         if swatch is None:
             return
         if floor is None:
@@ -1805,9 +1882,21 @@ class GameEngine:
 
     def _fixscore_action(self, action: str) -> None:
         if action == "confirm":
-            self.events.append(EventType.MANUAL_ADJUST, self.players[self.active_index].id if self.players else "", self.hole)
+            # One event per edited player, carrying the net change. Logging a
+            # bare event made undo drop a stroke even when nothing was changed.
+            for pid, delta in self._fix_score_delta.items():
+                if delta:
+                    sign = "+" if delta > 0 else "−"
+                    self.events.append(
+                        EventType.MANUAL_ADJUST, pid, self.hole, delta=int(delta),
+                        text=f"{self._player_name(pid)} score fixed {sign}{abs(delta)}",
+                    )
+            self._fix_score_delta = {}
             self._set_state(S.PAUSE)
         elif action == "back":
+            # Leaving without confirming still keeps the edits, but they are no
+            # longer one undoable step.
+            self._fix_score_delta = {}
             self._set_state(S.PAUSE)
 
     def _settings_action(self, action: str, msg: dict) -> None:
@@ -2221,37 +2310,88 @@ class GameEngine:
             if hit is not None:
                 self._retrack_from_detection(hit, floor)
                 return
+            # The detector passed on it but the user is pointing straight at it,
+            # so read the color from under the cursor and take their word.
+            swatch = sample_ball_at_pixel(
+                self._frame_color, float(ix), float(iy), self._ball_radius_px(floor))
+            if swatch is not None and floor is not None:
+                self._retrack_from_detection(swatch, floor)
+                return
         self._pointer_place_tee(nx, ny)
+
+    def _ball_radius_px(self, floor: tuple[float, float] | None) -> float | None:
+        """How wide a golf ball should look, in pixels, at a floor point.
+
+        The color sampler needs this: its disk has to cover the ball, and only
+        the mapper knows how many pixels a 43 mm ball spans on this camera.
+        """
+        if self.mapper is None:
+            return None
+        x, y = floor if floor is not None else (0.0, 0.0)
+        try:
+            return max(4.0, float(self.mapper.radius_to_pixels(x, y, 0.0215)))
+        except Exception:
+            return None
 
     def _retrack_from_detection(self, det: dict, floor: tuple[float, float] | None) -> None:
         pos = det.get("pos") or floor
         if pos is None:
             return
         hue = det.get("hue_name")
-        target = None
-        if hue:
-            target = next((p for p in self.players if p.hue_name == hue), None)
-        if target is None:
-            lost = self._lost_ball_snapshot()
-            if len(lost) == 1:
-                target = next((p for p in self.players if p.id == lost[0]["id"]), None)
-        if target is None:
-            target = self._active_player()
+        target = self._correction_target(hue)
         if target is None:
             return
         bid = self.ball_for_player.get(target.id)
         if not bid:
             return
-        if det.get("color"):
-            target.color = det["color"]
-        if hue:
-            target.hue_name = hue
-        if det.get("hue_range"):
-            target.hue_range = tuple(det["hue_range"])
+        self._adopt_ball_appearance(target, bid, det)
         self._retrack_ball(bid, (float(pos[0]), float(pos[1])))
         active = self._active_player()
         if active is not None and active.id == target.id and not self._shot_armed:
             self._place_tee_at(bid, (float(pos[0]), float(pos[1])), arm=False)
+
+    def _correction_target(self, hue_name: str | None) -> Player | None:
+        """Which player's ball the user most likely just pointed at.
+
+        A lost ball is the reason to click, so prefer those — first one whose
+        color matches what was clicked, then the only lost one.
+        """
+        lost_ids = [row["id"] for row in self._lost_ball_snapshot()]
+        lost = [p for p in self.players if p.id in lost_ids]
+        if hue_name:
+            match = next((p for p in lost if p.hue_name == hue_name), None)
+            if match is not None:
+                return match
+        if len(lost) == 1:
+            return lost[0]
+        if hue_name:
+            match = next((p for p in self.players if p.hue_name == hue_name), None)
+            if match is not None:
+                return match
+        return self._active_player()
+
+    def _adopt_ball_appearance(self, player: Player, bid: str, det: dict) -> None:
+        """Re-teach a ball its color from what the user clicked.
+
+        A miss usually means the sampled color was wrong, so correcting only the
+        position would lose the ball again on the next frame. The tracker is
+        updated as well as the player, since it holds the live match thresholds.
+        """
+        if det.get("color"):
+            player.color = det["color"]
+        if det.get("hue_name"):
+            player.hue_name = det["hue_name"]
+        player.hue_range = tuple(det["hue_range"]) if det.get("hue_range") else None
+        player.hue_center = det.get("hue_center")
+        if det.get("sat_floor") is not None:
+            player.sat_floor = int(det["sat_floor"])
+        if det.get("val_floor") is not None:
+            player.val_floor = int(det["val_floor"])
+        self.tracker.recolor(
+            bid, hue_center=player.hue_center, sat_floor=player.sat_floor,
+            val_floor=player.val_floor, hue_range=player.hue_range,
+            color_hex=player.color,
+        )
 
     def _pointer_putt(self, nx: float, ny: float) -> None:
         if self._putt is not None:
@@ -2462,18 +2602,42 @@ class GameEngine:
     # ===================================================================== #
     # Game rules
     # ===================================================================== #
-    def _apply_saved_setup(self) -> None:
-        cam_cfg = self.setup.camera
-        if cam_cfg and cam_cfg.get("mode") == "homography" and cam_cfg.get("H"):
-            H = np.array(cam_cfg["H"], dtype=float).reshape(3, 3)
+    def _restore_floor_mapping(self) -> bool:
+        """Rebuild the floor mapping from the saved setup. True when mapped.
+
+        Used both when loading a setup and after the camera is swapped, so
+        changing a Settings value mid-round does not silently leave the game
+        with no way to turn pixels into floor meters.
+        """
+        cam_cfg = self.setup.camera or {}
+        if cam_cfg.get("mode") == "homography" and cam_cfg.get("H"):
+            try:
+                H = np.array(cam_cfg["H"], dtype=float).reshape(3, 3)
+            except (TypeError, ValueError):
+                return False
             self.mapper = HomographyMapper(H)
             self.plane = None
-        elif self.setup.floor_plane is not None:
+            return True
+        if self.setup.floor_plane is not None:
             self.plane = self.setup.floor_plane
-            cam = self.setup.camera
-            self.cam = CameraModel(fx=cam.get("fx", self.cam.fx), fy=cam.get("fy", self.cam.fy),
-                                   cx=cam.get("cx", self.cam.cx), cy=cam.get("cy", self.cam.cy))
+            self.cam = CameraModel(
+                fx=cam_cfg.get("fx", self.cam.fx), fy=cam_cfg.get("fy", self.cam.fy),
+                cx=cam_cfg.get("cx", self.cam.cx), cy=cam_cfg.get("cy", self.cam.cy),
+            )
             self.mapper = FloorMapper(self.plane, self.cam)
+            return True
+        return False
+
+    def _apply_saved_setup(self) -> None:
+        self._restore_floor_mapping()
+        if self.reference_color is None:
+            ref = load_reference_color()
+            # Only trust it if it matches the live feed geometry.
+            if ref is not None and (
+                self._frame_color is None
+                or ref.shape == self._frame_color.shape
+            ):
+                self.reference_color = ref
         self.players = list(self.setup.players)
         if self.setup.courses:
             self.course_ids = list(self.setup.courses)
@@ -2544,6 +2708,7 @@ class GameEngine:
         self.setup.courses = list(self.course_ids)
         self.setup.name = (self.setup.name or "").strip() or "Living room"
         self.setup.save()
+        save_reference_color(self.reference_color)
 
     def _enter_hole(self) -> None:
         if self.hole - 1 < len(self.course_ids):
@@ -2719,7 +2884,14 @@ class GameEngine:
         self._set_strokes(pid, self._current_strokes(pid) + 1)
         n = self._current_strokes(pid)
         name = self._player_name(pid)
-        self.events.append(EventType.STROKE, pid, self.hole, text=f"{name} putted — stroke {n}")
+        # Remember where the ball was struck from so undo can put it back.
+        bid = self.ball_for_player.get(pid)
+        start = self._ball_positions.get(bid) if bid else None
+        self.events.append(
+            EventType.STROKE, pid, self.hole,
+            from_pos=[float(start[0]), float(start[1])] if start else None,
+            text=f"{name} putted — stroke {n}",
+        )
 
     def _resolve_after_stop(self, p: Player, tb, now: float) -> None:
         pos = tb.smoothed
@@ -2737,17 +2909,44 @@ class GameEngine:
             return
         # Out of bounds?
         if self.setup.play_area and not point_in_polygon(pos[0], pos[1], self.setup.play_area):
-            if self.settings.get("rules", "oobPenalty", default=True):
-                self._set_strokes(p.id, self._current_strokes(p.id) + 1)  # penalty
-            self.events.append(EventType.OOB, p.id, self.hole,
-                               text=f"{p.name} out of bounds — +1 penalty")
+            penalty = 1 if self.settings.get("rules", "oobPenalty", default=True) else 0
+            if penalty:
+                self._set_strokes(p.id, self._current_strokes(p.id) + penalty)
             bid = self.ball_for_player.get(p.id)
+            back = self._last_in_bounds.get(bid or "", pos)
+            self.events.append(
+                EventType.OOB, p.id, self.hole, penalty=penalty,
+                from_pos=[float(back[0]), float(back[1])],
+                text=(f"{p.name} out of bounds — +1 penalty" if penalty
+                      else f"{p.name} out of bounds"),
+            )
             self._oob_ball = pos
-            self._oob_exit = self._last_in_bounds.get(bid or "", pos)
+            self._oob_exit = back
             self._set_state(S.OOB)
             return
         # In play: advance turn.
         self._advance_turn()
+
+    def _replace_oob_ball(self) -> None:
+        """Put the ball back where it left the course.
+
+        Without this the ball stays outside the play area, so the very next stop
+        reports out-of-bounds again and the player can never resume.
+        """
+        p = self._active_player()
+        bid = self.ball_for_player.get(p.id) if p is not None else None
+        pos = None
+        if bid:
+            pos = self._last_in_bounds.get(bid) or self._oob_exit
+        if pos is None and self.setup.start is not None:
+            pos = (self.setup.start.x, self.setup.start.y)
+        self._oob_ball = None
+        self._oob_exit = None
+        if not bid or pos is None:
+            return
+        self._retrack_ball(bid, (float(pos[0]), float(pos[1])))
+        # A re-seed is not a putt.
+        self._ball_was_moving[bid] = False
 
     def _hole_is_complete(self) -> bool:
         return bool(self.players) and all(
@@ -2801,22 +3000,44 @@ class GameEngine:
             return
         pid = e.player_id
         cur = self._current_strokes(pid)
-        if e.type in (EventType.STROKE, EventType.OOB, EventType.MANUAL_ADJUST):
+        data = e.data or {}
+        if e.type == EventType.STROKE:
             self._set_strokes(pid, max(0, cur - 1))
-        elif e.type == EventType.HOLE_OUT:
+        elif e.type == EventType.OOB:
+            # No stroke was added when the penalty setting is off.
+            self._set_strokes(pid, max(0, cur - int(data.get("penalty", 1))))
+        elif e.type == EventType.MANUAL_ADJUST:
+            # Reverse exactly what Fix score applied, not a blind one stroke.
+            self._set_strokes(pid, max(0, cur - int(data.get("delta", 0))))
+        elif e.type in (EventType.HOLE_OUT, EventType.CAP):
+            # Both of these end the hole for a player; undo must un-end it or
+            # they are skipped for the rest of the hole.
             self.finished_hole[pid] = False
+        # Put the ball back where the shot was played from, so the score on the
+        # card and the ball on the floor tell the same story.
+        before = data.get("from_pos")
+        bid = self.ball_for_player.get(pid)
+        if bid and before:
+            self._retrack_ball(bid, (float(before[0]), float(before[1])))
+            self._ball_was_moving[bid] = False
         # Step the active player back.
         for i, pl in enumerate(self.players):
             if pl.id == pid:
                 self.active_index = i
                 break
+        self._transition_next = None
         self._sync_shot_arm()
         self._set_state(S.PLAY)
 
     def _adjust_score(self, pid: str, delta: int) -> None:
         if pid is None:
             return
-        self._set_strokes(pid, max(0, self._current_strokes(pid) + delta))
+        before = self._current_strokes(pid)
+        self._set_strokes(pid, max(0, before + delta))
+        # Track the net change so one MANUAL_ADJUST event undoes the whole edit.
+        self._fix_score_delta[pid] = (
+            self._fix_score_delta.get(pid, 0) + self._current_strokes(pid) - before
+        )
 
     def _start_new_game(self) -> None:
         self._begin_game()
@@ -2848,7 +3069,9 @@ class GameEngine:
             "sensor_status": self.sensor_status,
             "settings": self.settings.data,
             "feed": {"enabled": self.settings.get("display", "showCameraFeed", default=True),
-                     "w": self._feed_w, "h": self._feed_h},
+                     "w": self._feed_w, "h": self._feed_h,
+                     "stale": bool(self._feed_stale),
+                     "error": self._camera_error},
             "setup": self._safe_part(self._setup_snapshot, {}),
             "game": self._safe_part(self._game_snapshot, {}),
             "overlay": self._safe_part(self._overlay_snapshot, {"shapes": []}),
@@ -3093,6 +3316,7 @@ class GameEngine:
             "is_mock": self.is_mock,
             "sensor_status": self.sensor_status,
             "error": self._camera_error,
+            "stale": bool(self._feed_stale),
             "debug_overlay": bool(self.settings.get("display", "debugOverlay", default=False)),
         }
 
@@ -3249,18 +3473,27 @@ class GameEngine:
                 "snapshot": bool(self._finish_jpeg),
                 "snapshot_url": "/snapshot.jpg" if self._finish_jpeg else ""}
 
+    def _par_so_far(self) -> int:
+        """Par for the holes actually played, so mid-round "vs par" is honest.
+
+        Comparing a total against the whole night's par showed an even player
+        as +6 after hole 1.
+        """
+        played = self.holes if self.state == S.GAME_FINISH else self.hole
+        return sum(self.course_pars[:max(1, played)])
+
     def _leader_snapshot(self) -> dict | None:
         if not self.players:
             return None
         ordered = standings([p.as_dict() for p in self.players], self.player_scores)
         top = ordered[0]
-        par = sum(self.course_pars)
+        par = self._par_so_far()
         t = total(self.player_scores, top["id"])
         return {"name": top["name"], "color": top["color"], "total": t, "vs_par": vs_par(t, par)}
 
     def _standings_snapshot(self) -> list[dict]:
         ordered = standings([p.as_dict() for p in self.players], self.player_scores)
-        par = sum(self.course_pars)
+        par = self._par_so_far()
         out = []
         for i, p in enumerate(ordered):
             t = total(self.player_scores, p["id"])
@@ -3580,6 +3813,9 @@ class GameEngine:
                     style = {"stroke": "#f2efe8", "stroke_width": 4, "fill": "rgba(242,239,232,0.08)"}
                 o["shapes"].append({"type": "polygon", "pts": pts,
                                     "id": f"obstacle_{ob.id}",
+                                    # Ties this outline to its corner handles so
+                                    # dragging one obstacle cannot move another.
+                                    "group": f"o{oi}",
                                     "label": "deleted · LB to undo" if ob.state == "deleted" else None,
                                     **style})
                 if selected and pts:

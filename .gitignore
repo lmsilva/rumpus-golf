@@ -13,6 +13,7 @@ env/
 rumpus-setup.json
 rumpus-settings.json
 rumpus-game.json
+rumpus-floor.png
 
 # Media / assets
 # Photos, music and SFX are bundled and committed so the game works offline

@@ -21,6 +21,7 @@ WEB_DIR = PROJECT_ROOT / "web"
 SETUP_PATH = PROJECT_ROOT / "rumpus-setup.json"     # calibration + obstacles + balls + players
 SETTINGS_PATH = PROJECT_ROOT / "rumpus-settings.json"  # user preferences
 GAME_PATH = PROJECT_ROOT / "rumpus-game.json"       # in-progress game autosave
+REFERENCE_PATH = PROJECT_ROOT / "rumpus-floor.png"  # empty-floor picture (webcam path)
 
 
 def ensure_runtime_dirs() -> None:

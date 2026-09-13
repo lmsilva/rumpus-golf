@@ -58,9 +58,12 @@ def build_scorecard(players: list, player_scores: dict[str, list[int | None]],
             "id": pid, "name": p.get("name", ""), "color": p.get("color", ""),
             "scores": sc, "total": total(player_scores, pid),
         })
+    # Only the holes played so far: the card is also shown after hole 1 of 9,
+    # where the full par list would put par columns under empty scores.
+    pars = list(course_pars[:hole_count])
     return {
         "players": rows,
         "holes": list(range(1, hole_count + 1)),
-        "pars": course_pars,
-        "par_total": sum(course_pars),
+        "pars": pars,
+        "par_total": sum(pars),
     }

@@ -30,7 +30,7 @@ class KinectV1Backend(SensorBackend):
             fps=30,
         )
         self._freenect = None
-        self._dev = None
+        self._depth_format = None
         self._last: Frame | None = None
         self._opened = False
 
@@ -40,30 +40,52 @@ class KinectV1Backend(SensorBackend):
         except Exception:
             return False
         self._freenect = freenect
+        # DEPTH_REGISTERED is millimeters already aligned to the RGB frame;
+        # DEPTH_MM is millimeters but *not* aligned, so depth pixels would not
+        # correspond to the color pixels the hue matching reads.
+        self._depth_format = getattr(
+            freenect, "DEPTH_REGISTERED", getattr(freenect, "DEPTH_MM", 4),
+        )
+        # freenect's sync API owns its own context and device. Calling
+        # open_device() here as well claims the device and makes every
+        # sync_get_* fail, so let the sync helpers do the opening.
         try:
-            freenect.init()
-            self._dev = freenect.open_device(freenect.num_devices() - 1)
+            depth = freenect.sync_get_depth(format=self._depth_format)
+            video = freenect.sync_get_video(format=freenect.VIDEO_RGB)
         except Exception:
             return False
-        try:
-            freenect.set_depth_mode(self._dev, freenect.DEPTH_MM)
-            freenect.set_video_mode(self._dev, freenect.VIDEO_RGB)
-        except Exception:
-            pass
+        if depth is None or video is None:
+            return False
         self._opened = True
         return True
 
     def close(self) -> None:
         if self._freenect is not None:
             try:
-                self._freenect.close_device(self._dev)
-                self._freenect.shutdown()
+                self._freenect.sync_stop()
             except Exception:
                 pass
         self._opened = False
 
     def is_open(self) -> bool:
         return self._opened
+
+    def detach_handle(self) -> None:
+        """Release the USB context so the game loop can claim it.
+
+        libfreenect handles belong to the thread that opened them, and the
+        sensor is opened on a worker thread so the boot menu stays responsive.
+        """
+        if self._freenect is not None:
+            try:
+                self._freenect.sync_stop()
+            except Exception:
+                pass
+        self._last = None
+        self._opened = False
+
+    def reopen_on_this_thread(self, full: bool = False) -> bool:
+        return self.open()
 
     def lock_capture(self, exposure: float | None = None) -> None:
         return
@@ -73,12 +95,16 @@ class KinectV1Backend(SensorBackend):
 
     def grab(self) -> Frame:
         f = self._freenect
+        if f is None:
+            return Frame(color=None, depth=None, t=time.time(), source="kinect-v1")
         try:
-            # sync_get_depth/video (registered) return numpy arrays.
-            depth = f.sync_get_depth(format=f.DEPTH_MM)  # type: ignore[attr-defined]
-            color = f.sync_get_video(format=f.VIDEO_RGB)  # type: ignore[attr-defined]
-            depth = np.asarray(depth, dtype=np.float32)
-            color = np.asarray(color, dtype=np.uint8)
+            # Both sync helpers return (ndarray, timestamp), or None on error.
+            d = f.sync_get_depth(format=self._depth_format)  # type: ignore[attr-defined]
+            c = f.sync_get_video(format=f.VIDEO_RGB)  # type: ignore[attr-defined]
+            if d is None or c is None:
+                raise RuntimeError("kinect v1 delivered no frame")
+            depth = np.asarray(d[0], dtype=np.float32)
+            color = np.asarray(c[0], dtype=np.uint8)
             # VIDEO_RGB is RGB; our pipeline uses BGR.
             if color.ndim == 3 and color.shape[-1] == 3:
                 color = color[:, :, ::-1].copy()
@@ -86,6 +112,8 @@ class KinectV1Backend(SensorBackend):
             self._last = frame
             return frame
         except Exception:
+            # Keep the stale frame's timestamp: the engine treats a ``t`` that
+            # stops advancing as a dead stream rather than tracking on it.
             if self._last is not None:
                 return self._last
-            return Frame(color=None, depth=None, t=time.time(), source="kinect-v1")
+            return Frame(color=None, depth=None, t=0.0, source="kinect-v1")

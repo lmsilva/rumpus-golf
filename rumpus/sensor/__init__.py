@@ -48,6 +48,14 @@ def create_backend(
             b = _try_open(kind)
             if b is not None:
                 return b, kind
+        elif backend_mode == "kinect":
+            # USB enumeration can time out or miss the device (custom driver,
+            # no PowerShell). Asking the driver to open it is just as
+            # conclusive, so don't give up on an explicit Kinect preference.
+            for guess in ("v2", "v1"):
+                b = _try_open(guess)
+                if b is not None:
+                    return b, guess
         if backend_mode == "kinect":
             if allow_mock:
                 b = MockBackend()
@@ -81,7 +89,9 @@ def _open_webcam(camera_index: int, camera_res: str, settings,
     if not try_others:
         return None
     from .webcam import list_webcams
-    seen = {int(camera_index)}
+    # open() walks the same-name siblings itself; negotiating them a second
+    # time here doubled an already slow boot when no camera has a picture.
+    seen = set(getattr(b, "tried_indices", None) or {int(camera_index)})
     for cam in list_webcams():
         try:
             idx = int(cam.get("index", -1))

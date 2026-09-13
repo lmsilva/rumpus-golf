@@ -27,20 +27,24 @@ def test_mock_lock_is_noop():
     b.close()
 
 
-def test_gate_is_velocity_aware():
+def test_gate_opens_on_misses_and_stays_bounded():
     tracker = BallTracker()
     tracker.add_ball("ball0", "p0", "#ff8a3d", hue_range=(8, 24))
     ball = tracker.balls["ball0"]
     now = time.time()
     tracker.seed_position("ball0", (0.0, 0.0), now=now, hold=True)
-    assert tracker.gate_radius(ball, now) == 0.55
+    assert tracker.predict_gate_radius(ball) == 0.55
     ball.held = False
-    ball._speed = 1.0
-    ball.last_seen_t = now - 0.2
-    got = tracker.gate_radius(ball, now)
-    assert abs(got - (0.3 + 1.0 * 0.2 * 1.5)) < 1e-6
-    assert tracker._within_gate(ball, (0.5, 0.0), now)
-    assert not tracker._within_gate(ball, (1.2, 0.0), now)
+    tight = tracker.predict_gate_radius(ball)
+    assert tight <= 0.2
+    # Missed frames must widen the gate so a fast putt can be re-acquired,
+    # but never so far that a decoy across the room becomes reachable.
+    for _ in range(10):
+        ball.filter.predict(1.0 / 30.0)
+        ball.filter.decay_velocity(1.0 / 30.0)
+    wide = tracker.predict_gate_radius(ball)
+    assert wide > tight
+    assert wide <= 1.20
 
 
 def test_hue_window_and_clash():
@@ -145,6 +149,50 @@ def test_two_ball_identities_survive_pass():
     backend.close()
 
 
+def test_depth_putt_coasts_through_dropout():
+    """A Kinect putt with missing frames coasts instead of going lost."""
+    backend = MockBackend()
+    backend.open()
+    ball = {"x": -0.6, "y": 0.0, "r": 0.022, "color": (0, 110, 255), "height_m": 0.04}
+    backend.set_scene(balls=[dict(ball)])
+    tracker = BallTracker()
+    tracker.add_ball("ball0", "p0", "#ff8a3d", hue_range=(8, 24),
+                     hue_center=14.0, sat_floor=80, val_floor=120)
+    now = time.time()
+    tracker.seed_position("ball0", (-0.6, 0.0), now=now)
+    coasted = False
+    for i in range(30):
+        x = -0.6 + i * 0.05
+        # Every third depth frame drops the ball entirely.
+        backend.set_scene(balls=[] if i % 3 == 2 else [dict(ball, x=x)])
+        now += 1.0 / 30.0
+        frame = backend.grab()
+        tracker.update(frame.color, frame.depth, backend.mapper, backend.cam,
+                       backend.plane, [], now)
+        tb = tracker.balls["ball0"]
+        assert not tb.lost
+        coasted = coasted or tb.coasting
+    assert coasted
+    pos = tracker.balls["ball0"].smoothed
+    assert pos is not None and pos[0] > 0.2
+    backend.close()
+
+
+def test_depth_click_correction_relearns_color():
+    """Re-teaching a ball its color lets automatic tracking pick it back up."""
+    tracker = BallTracker()
+    # Stored hue is wrong (blue) for an orange ball — the usual reason a user
+    # has to click a missed ball at all.
+    tracker.add_ball("ball0", "p0", "#5b8cff", hue_range=(95, 128),
+                     hue_center=110.0, sat_floor=80, val_floor=120)
+    tracker.recolor("ball0", hue_center=14.0, sat_floor=80, val_floor=120,
+                    hue_range=(8, 24), color_hex="#ff8a3d")
+    tb = tracker.balls["ball0"]
+    assert tb.hue_center == 14.0
+    assert tb.hue_range == (8, 24)
+    assert tb.color == "#ff8a3d"
+
+
 def _setup_mapper():
     # 400 px / m so a 43 mm ball is ~17 px — same order as a 720p overhead cam.
     return HomographyMapper(np.array([[400.0, 0, 0], [0, 400.0, 0], [0, 0, 1.0]]))
@@ -190,6 +238,130 @@ def test_click_selects_nearby_white_ball_not_the_plank():
     hit = nearest_setup_ball(dets, mapper, 168, 124, max_px=64)
     assert hit is not None
     assert hit["hue_name"] in ("white", "orange")
+
+
+# --------------------------------------------------------------------------- #
+# 1080p webcam in a dim living room
+#
+# Measured off a real C920 frame: a white ball on a warm rug under a locked
+# indoor exposure came out at V=85 / S=25 against a floor of V=76 / S=78. It is
+# barely brighter than the floor, so every absolute brightness threshold in the
+# pipeline rejected it and neither the detector nor a direct click could find it.
+# --------------------------------------------------------------------------- #
+# These two reproduce the measured frame: whole-frame S 77 / V 76, ball S 21 / V 85.
+DIM_RUG_BGR = (53, 61, 76)      # warm and saturated, but dark
+DIM_BALL_BGR = (78, 81, 85)     # near-neutral grey, only ~9 V above the rug
+
+
+def _dim_rug(h=1080, w=1920):
+    """A 1080p frame of textured warm carpet, no brighter than a dim room."""
+    rng = np.random.default_rng(7)
+    img = np.zeros((h, w, 3), np.uint8)
+    img[:] = DIM_RUG_BGR
+    grain = rng.integers(-12, 13, size=(h, w, 1), dtype=np.int16)
+    streak = (np.sin(np.arange(w) / 3.0) * 8).astype(np.int16)[None, :, None]
+    img = np.clip(img.astype(np.int16) + grain + streak, 0, 255).astype(np.uint8)
+    return img
+
+
+def _dim_mapper():
+    # 1920 px across 1.8 m, so a 43 mm ball spans about 46 px — a 1080p webcam
+    # on a tripod, where the ball is much bigger than the old fixed windows.
+    return HomographyMapper(np.array([[1067.0, 0, 960.0], [0, 1067.0, 540.0], [0, 0, 1.0]]))
+
+
+def _dim_play_area():
+    return [(-0.85, -0.45), (0.85, -0.45), (0.85, 0.45), (-0.85, 0.45)]
+
+
+def test_dim_room_white_ball_is_found_at_1080p():
+    import cv2
+    img = _dim_rug()
+    cv2.circle(img, (1330, 415), 23, DIM_BALL_BGR, -1)
+    mapper = _dim_mapper()
+    for loose in (False, True):
+        dets = detect_setup_balls(img, None, mapper, _dim_play_area(), loose=loose)
+        assert len(dets) == 1, f"loose={loose}: expected the ball only, got {len(dets)}"
+        px, py = mapper.floor_to_pixel(*dets[0]["pos"])
+        assert np.hypot(px - 1330, py - 415) < 20
+        assert dets[0]["hue_name"] == "white"
+
+
+def test_dim_room_white_ball_stays_matchable_after_sampling():
+    """The thresholds handed to the tracker must sit below what was measured."""
+    import cv2
+    img = _dim_rug()
+    cv2.circle(img, (1330, 415), 23, DIM_BALL_BGR, -1)
+    det = detect_setup_balls(img, None, _dim_mapper(), _dim_play_area())[0]
+    hsv = cv2.cvtColor(np.uint8([[DIM_BALL_BGR]]), cv2.COLOR_BGR2HSV)[0][0]
+    # An absolute val_floor of 160 sat above this ball, so the tracker lost it
+    # again on the next frame — right after the player had corrected it.
+    assert det["val_floor"] <= int(hsv[2])
+    assert det["sat_floor"] <= max(8, int(hsv[1]))
+
+
+def test_dim_room_click_lands_on_the_ball_not_the_rug():
+    import cv2
+    img = _dim_rug()
+    cv2.circle(img, (1330, 415), 23, DIM_BALL_BGR, -1)
+    r_px = float(_dim_mapper().radius_to_pixels(0.0, 0.0, 0.0215))
+    assert sample_ball_at_pixel(img, 1330, 415, r_px) is not None
+    assert sample_ball_at_pixel(img, 1330, 415, r_px)["hue_name"] == "white"
+    # Bare rug and the ball's own shadow must still be refused.
+    assert sample_ball_at_pixel(img, 700, 800, r_px) is None
+    cv2.circle(img, (1330, 470), 20, (30, 42, 62), -1)      # shadow
+    assert sample_ball_at_pixel(img, 1330, 470, r_px) is None
+
+
+def test_dim_room_white_putt_tracks_across_the_rug():
+    """The whole point: a real 2D-camera setup has to track a putt end to end."""
+    import cv2
+    mapper = _dim_mapper()
+    play = _dim_play_area()
+    ref = _dim_rug()
+    # Appearance sampled the way the setup step does, not hand-picked numbers.
+    probe = _dim_rug()
+    cv2.circle(probe, (1330, 415), 23, DIM_BALL_BGR, -1)
+    det = detect_setup_balls(probe, ref, mapper, play)[0]
+    tracker = BallTracker()
+    tracker.add_ball("ball0", "p0", det["color"], hue_range=det["hue_range"],
+                     hue_center=det["hue_center"], sat_floor=det["sat_floor"],
+                     val_floor=det["val_floor"])
+    now = time.time()
+    for _ in range(24):                     # let the motion model settle
+        now += 1.0 / 30.0
+        tracker.update(ref.copy(), None, mapper, None, None, [], now,
+                       play_area=play, reference_color=ref)
+    x, y = -0.6, 0.0
+    tracker.seed_position("ball0", (x, y), now=now)
+    seen = 0
+    for _ in range(24):
+        x += 0.045
+        frame = ref.copy()
+        _paint_ball(frame, mapper, (x, y), DIM_BALL_BGR)
+        now += 1.0 / 30.0
+        tracker.update(frame, None, mapper, None, None, [], now,
+                       play_area=play, reference_color=ref)
+        tb = tracker.balls["ball0"]
+        assert not tb.lost
+        if tb.smoothed is not None and abs(tb.smoothed[0] - x) < 0.08:
+            seen += 1
+    # Most frames must land on the ball, not merely avoid going lost.
+    assert seen >= 18, seen
+    assert tracker.balls["ball0"].smoothed[0] > 0.2
+
+
+def test_click_sampling_scales_itself_without_a_mapper():
+    """Before calibration there is no mapper, so the disk must size itself.
+
+    A disk fixed at 14 px sits well inside a 46 px ball, which put the
+    comparison ring on the ball itself.
+    """
+    import cv2
+    img = _dim_rug()
+    cv2.circle(img, (1330, 415), 23, DIM_BALL_BGR, -1)
+    assert sample_ball_at_pixel(img, 1330, 415) is not None
+    assert sample_ball_at_pixel(img, 700, 800) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -413,13 +585,20 @@ def test_color_gate_rejects_same_hue_decoy():
 
 if __name__ == "__main__":
     test_mock_lock_is_noop()
-    test_gate_is_velocity_aware()
+    test_gate_opens_on_misses_and_stays_bounded()
     test_hue_window_and_clash()
     test_mock_putt_tracks_without_teleport()
     test_two_ball_identities_survive_pass()
+    test_depth_putt_coasts_through_dropout()
+    test_depth_click_correction_relearns_color()
     test_oak_grain_is_not_an_orange_ball()
     test_neon_orange_ball_is_detected()
     test_click_selects_nearby_white_ball_not_the_plank()
+    test_dim_room_white_ball_is_found_at_1080p()
+    test_dim_room_white_ball_stays_matchable_after_sampling()
+    test_dim_room_click_lands_on_the_ball_not_the_rug()
+    test_dim_room_white_putt_tracks_across_the_rug()
+    test_click_sampling_scales_itself_without_a_mapper()
     test_color_putt_coasts_through_dropout()
     test_color_brief_pause_does_not_split_stroke()
     test_color_crossing_identities_hold()

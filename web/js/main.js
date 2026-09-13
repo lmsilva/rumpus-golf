@@ -32,8 +32,26 @@ window.RG = window.RG || {};
   };
 
   // ---- state handling ----
+  // Screens read st.ui.x / st.game.y directly, and a render throw leaves the
+  // last screen frozen on screen. The engine sends {} for any section it could
+  // not build, so guarantee the containers exist before anything renders.
+  function normalize(st) {
+    for (const key of ["ui", "game", "setup", "settings", "overlay", "feed"]) {
+      if (!st[key] || typeof st[key] !== "object") st[key] = {};
+    }
+    if (!st.game.scores || typeof st.game.scores !== "object") st.game.scores = {};
+    if (!st.game.finished_hole || typeof st.game.finished_hole !== "object") {
+      st.game.finished_hole = {};
+    }
+    if (!Array.isArray(st.game.players)) st.game.players = [];
+    if (!Number.isFinite(st.game.hole)) st.game.hole = 1;
+    if (!Number.isFinite(st.game.holes)) st.game.holes = 1;
+    return st;
+  }
+
   function onState(st) {
     if (!st || !st.screen) return;
+    normalize(st);
     state = st;
     RG.settings = st.settings || RG.settings;
     applyTheme(st.settings && st.settings.theme);
@@ -85,7 +103,7 @@ window.RG = window.RG || {};
     RG.feed.overlay((st.overlay && st.overlay.shapes) || []);
     patchS05(st);
     patchS11(st);
-    patchS19(st);
+    patchLiveRate(st);
     handleMusic(st);
     syncSettingsFab(screen);
   }
@@ -101,7 +119,8 @@ window.RG = window.RG || {};
       return `${(st.ui && st.ui.preset) || ""}|${(st.ui && st.ui.color_only) ? 1 : 0}|${n}`;
     }
     if (st.screen === "S06") return `${(st.game && st.game.course_id) || ""}|${st.ui && st.ui.recalibrating ? 1 : 0}`;
-    if (st.screen === "S07") return `${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
+    // st.state matters: S07 renders as either first-time build or hole rebuild.
+    if (st.screen === "S07") return `${st.state}|${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
     if (st.screen === "S08") return `${(st.ui && st.ui.has_hole) ? 1 : 0}|${(st.ui && st.ui.searching) ? 1 : 0}|${(st.ui && st.ui.manual) ? 1 : 0}`;
     if (st.screen === "S10") return [(st.ui && st.ui.holes), (st.ui && st.ui.stroke_cap)].join("|");
     if (st.screen === "S07b" || st.screen === "S07c") {
@@ -110,7 +129,8 @@ window.RG = window.RG || {};
     }
     if (st.screen === "S09") {
       const ps = (st.ui && st.ui.players) || [];
-      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}|${st.ui && st.ui.hue_clash ? 1 : 0}|${st.ui && st.ui.recalibrating ? 1 : 0}`;
+      const found = ((st.ui && st.ui.balls) || []).length;
+      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}|${st.ui && st.ui.hue_clash ? 1 : 0}|${st.ui && st.ui.recalibrating ? 1 : 0}|${found}|${(st.ui && st.ui.rejected) || 0}`;
     }
     if (st.screen === "S14") return String(((st.ui && st.ui.lost_balls) || []).length);
     if (st.screen === "S15") return `${st.ui && st.ui.focus}|${st.ui && st.ui.recal_flyout ? 1 : 0}`;
@@ -118,7 +138,12 @@ window.RG = window.RG || {};
     const g = st.game || {};
     const ui = st.ui || {};
     const a = ui.active_player;
-    const others = (ui.others || []).map((p) => `${p.id}:${(g.scores[p.id] || [])[g.hole - 1] || 0}`).join(",");
+    const done = g.finished_hole || {};
+    // finished_hole is in here so a player who holes out stops being labelled
+    // "in play" on the side cards even when their score did not change.
+    const others = (ui.others || [])
+      .map((p) => `${p.id}:${(g.scores[p.id] || [])[g.hole - 1] || 0}:${done[p.id] ? 1 : 0}`)
+      .join(",");
     const lost = ((ui.lost_balls || []).map((b) => b.id).join(","));
     return [a && a.id, g.hole, (g.scores[a && a.id] || [])[g.hole - 1] || 0, ui.awaiting_tee ? 1 : 0, others, lost].join("|");
   }
@@ -205,14 +230,21 @@ window.RG = window.RG || {};
     fab.innerHTML = `${RG.glyph("settings")}<span>Settings</span>`;
   }
 
-  function patchS19(st) {
-    if (st.screen !== "S19") return;
-    const el = scene.querySelector("[data-live-rate]");
-    if (!el) return;
+  // Every live pill, on every screen. Without this the pills froze at whatever
+  // they said when the screen was first painted.
+  function patchLiveRate(st) {
+    const els = scene.querySelectorAll("[data-live-rate]");
+    if (!els.length) return;
     const cam = (st.ui && st.ui.camera) || {};
     const fps = cam.measured_fps != null ? cam.measured_fps : (st.sensor && st.sensor.fps);
-    el.textContent = liveRateText(st);
-    el.classList.toggle("is-slow", fps != null && Number(fps) < 20);
+    const stale = !!(st.feed && st.feed.stale);
+    const slow = stale || (fps != null && Number(fps) < 20);
+    els.forEach((el) => {
+      el.textContent = stale
+        ? "NO SIGNAL"
+        : (el.hasAttribute("data-live-compact") ? "LIVE" : liveRateText(st));
+      el.classList.toggle("is-slow", slow);
+    });
   }
 
   function playStatusText(st) {
@@ -399,6 +431,10 @@ window.RG = window.RG || {};
       "data-set-playlist", "data-set-rule-holes", "data-set-rule-cap", "data-set-camera-device",
       "data-set-camera-resolution", "data-set-camera-backend", "data-set-preset", "data-set-holes",
       "data-set-announcer", "data-set-rumble", "data-set-feed", "data-set-rule-oob", "data-set-rule-tunnel",
+      // Sliders echo their value back through the state, which rebuilds the
+      // screen; without these the knob loses focus on every drag step.
+      "data-set-musicvol", "data-set-sfxvol", "data-set-camera-exposure",
+      "data-set-debug-overlay",
       "data-text",
     ];
     return attrs.filter((a) => el.hasAttribute(a)).map((a) => `${a}=${el.getAttribute(a)}`).join("|");

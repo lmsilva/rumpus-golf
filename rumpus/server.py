@@ -184,7 +184,17 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
             except Exception:
                 import traceback
                 traceback.print_exc()
-                return
+                # Publish something rather than nothing: skipping the publish
+                # leaves every browser frozen on the last good state forever,
+                # with no way for the player to tell that anything is wrong.
+                state = {
+                    "screen": "S01", "state": "BOOT", "sensor_status": "error",
+                    "ui": {}, "game": {}, "setup": {}, "overlay": {"shapes": []},
+                    "settings": {},
+                    "feed": {"enabled": False, "w": 0, "h": 0, "stale": True,
+                             "error": "The game hit an internal error. "
+                                      "Restart Rumpus Golf."},
+                }
             broadcaster.publish(state, jpeg)
 
         opened = {"done": False, "backend": None, "cam": None, "error": None}

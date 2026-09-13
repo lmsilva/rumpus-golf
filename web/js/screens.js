@@ -47,12 +47,19 @@ function photo(name, filter, scrim, opts = {}) {
     <div class="scrim" style="background:${scrim || "transparent"}"></div>
   </div>`;
 }
-function livePill(st, compact) {
+function liveText(st, compact) {
+  if (st.feed && st.feed.stale) return "NO SIGNAL";
   const w = (st.feed && st.feed.w) || 0;
   const h = (st.feed && st.feed.h) || 0;
   const fps = (st.sensor && st.sensor.fps) || (st.ui && st.ui.camera && st.ui.camera.measured_fps) || 30;
   const fpsTxt = Number(fps).toFixed(Number(fps) % 1 ? 1 : 0);
-  return `<span class="pill live-pill">${compact ? "LIVE" : `LIVE · ${w} × ${h} · ${fpsTxt} fps`}</span>`;
+  return compact ? "LIVE" : `LIVE · ${w} × ${h} · ${fpsTxt} fps`;
+}
+function livePill(st, compact) {
+  // data-live-rate lets main.js refresh the text without rebuilding the screen,
+  // so fps / resolution / NO SIGNAL stay current even on a static screen.
+  const stale = st.feed && st.feed.stale ? " is-slow" : "";
+  return `<span class="pill live-pill${stale}" data-live-rate${compact ? " data-live-compact" : ""}>${liveText(st, compact)}</span>`;
 }
 function hasDepth(st) {
   const d = (st.sensor && st.sensor.depth_res) || (st.ui && st.ui.sensor && st.ui.sensor.depth_res);
@@ -178,13 +185,13 @@ S.S02 = function (st) {
 S.S03 = function (st) {
   const setup = st.setup || {};
   return `
-  <div class="glass" style="position:absolute;left:56px;top:56px;max-width:900px;border-radius:24px;padding:32px 40px;z-index:3">
+  <div class="glass feed-pass" style="position:absolute;left:56px;top:56px;max-width:900px;border-radius:24px;padding:32px 40px;z-index:3">
     <div class="kicker mint">Verify · ${esc(setup.name || "Living room")}</div>
     <h2 style="font-size:60px;margin:10px 0 16px">Do the lines still sit on the floor?</h2>
     <div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">White = play area, start and the obstacles you confirmed. Mint = hole. If only something moved, Recalibrate lets you redo just that — cup, obstacles or zones.</div>
   </div>
-  <div style="position:absolute;right:56px;top:56px;z-index:3">${livePill(st)}</div>
-  <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
+  <div class="feed-pass" style="position:absolute;right:56px;top:56px;z-index:3">${livePill(st)}</div>
+  <div class="row feed-pass" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
     <button class="btn primary" data-action="confirm" style="min-width:400px"><span>Looks right</span>${RG.btnHint("confirm")}</button>
     <button class="btn glass" data-action="recalibrate" style="min-width:400px"><span>Recalibrate</span>${RG.btnHint("undo")}</button>
     <button class="btn glass" data-action="back"><span>Back</span>${RG.btnHint("back")}</button>
@@ -353,7 +360,7 @@ S["S07b"] = function (st) {
   <div class="feed-split">
     <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
       ${livePill(st, true)}
-      <div class="pill" style="position:absolute;left:16px;top:16px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Scanned 1.5 s of depth · dashed = proposed</div>
+      <div class="pill feed-pass" style="position:absolute;left:16px;top:16px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Scanned 1.5 s of depth · dashed = proposed</div>
       <div class="hints">${RG.hint("stick", "Move cursor")}${RG.hint("confirm", "Select object")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Draw one")}${RG.hint("prev", "Undo")}</div>
     </div>
     <div class="card" style="padding:36px;display:flex;flex-direction:column">
@@ -391,7 +398,7 @@ S["S07c"] = function (st) {
   <div class="feed-split">
     <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
       ${livePill(st, true)}
-      <div class="legend" style="position:absolute;left:16px;top:16px;z-index:3">
+      <div class="legend feed-pass" style="position:absolute;left:16px;top:16px;z-index:3">
         <span class="pill">${`<span class="swatch" style="background:var(--mint)"></span>`} Selected</span>
         <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
         <span class="pill">${`<span class="swatch" style="background:rgba(242,239,232,.3)"></span>`} Pending</span>
@@ -429,13 +436,13 @@ S.S08 = function (st) {
   const searching = !!ui.searching && !ui.has_hole;
   const title = searching ? "Place the putting cup inside the play area." : (ui.manual && !ui.has_hole ? "Click the cup, then drag the edge to size it." : "Found the cup.");
   return `
-  ${searching ? `<div class="feed-progress indet"></div>` : ""}
-  <div class="glass" style="position:absolute;left:40px;top:40px;max-width:720px;padding:28px 32px;border-radius:24px;z-index:3">
+  ${searching ? `<div class="feed-progress indet feed-pass"></div>` : ""}
+  <div class="glass feed-pass" style="position:absolute;left:40px;top:40px;max-width:720px;padding:28px 32px;border-radius:24px;z-index:3">
     <div class="kicker mint">Step 4 of 5 · Cup</div>
     <h2 style="font-size:60px;line-height:1;margin:8px 0 10px">${esc(title)}</h2>
     <div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">${searching ? "Looking for a still cup with a white ring." : "Mint circle sits on the ring. Drag the cream dot to resize."}</div>
   </div>
-  <div class="row" style="position:absolute;left:40px;bottom:40px;gap:12px;z-index:3">
+  <div class="row feed-pass" style="position:absolute;left:40px;bottom:40px;gap:12px;z-index:3">
     <button class="btn primary" data-action="confirm"${ui.has_hole ? "" : " disabled"}><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
     <button class="btn glass" data-action="redetect"><span>Detect again</span>${RG.btnHint("undo")}</button>
     <button class="btn glass" data-action="draw"><span>Draw it myself</span>${RG.btnHint("secondary")}</button>
@@ -642,12 +649,12 @@ S.S13 = function (st) {
   const sub = diff === 0 ? "On par" : diff < 0 ? "Under par — birdie!" : "Over par, still counts";
   const fill = playerFill(p.color);
   return `
-  <div class="s13-banner" style="position:absolute;left:40px;top:40px;right:40px;background:${fill.bg};color:${fill.fg};border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;border-left:18px solid ${fill.accent}">
+  <div class="s13-banner feed-pass" style="position:absolute;left:40px;top:40px;right:40px;background:${fill.bg};color:${fill.fg};border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;border-left:18px solid ${fill.accent}">
     <div style="font:800 200px/1 var(--font-display);letter-spacing:-.05em">In!</div>
     <div><div style="font:800 64px/1.05 var(--font-display)">${esc(p.name)} holed in ${n}.</div>
     <div style="font:600 30px var(--font-body);opacity:.7">${sub} · Par ${par}</div></div>
   </div>
-  <div class="row" style="position:absolute;left:56px;bottom:48px;gap:12px;z-index:5">
+  <div class="row feed-pass" style="position:absolute;left:56px;bottom:48px;gap:12px;z-index:5">
     ${RG.hint("undo", "Wrong call? Undo within 5 s — the ball goes back in play at the cup.")}
   </div>`;
 };
@@ -656,7 +663,7 @@ S.S14 = function (st) {
   const p = st.ui.player || {};
   const lost = st.ui.lost_balls || [];
   return `
-  <div class="row" style="position:absolute;inset:40px;z-index:3;align-items:flex-start;gap:16px">
+  <div class="row feed-pass" style="position:absolute;inset:40px;z-index:3;align-items:flex-start;gap:16px">
     ${p ? `<div style="background:${p.color};color:var(--player-text);border-radius:24px;padding:26px 40px;display:flex;align-items:center;gap:36px">
       <div><div class="kicker" style="color:var(--player-text);opacity:.7">Your turn</div><div style="font:800 76px/1.15 var(--font-display);overflow:hidden">${marquee(p.name)}</div></div>
       <div><div class="kicker" style="color:var(--player-text);opacity:.7">Stroke</div><div style="font:800 76px/1.15 var(--font-display)">${st.ui.strokes} + 1</div></div>
@@ -666,8 +673,8 @@ S.S14 = function (st) {
       <div style="font:800 52px/1 var(--font-display)">+1 penalty</div>
     </div>
   </div>
-  <div class="glass-strong" style="position:absolute;left:40px;bottom:${lost.length ? 140 : 40}px;right:40px;border-radius:24px;padding:18px 24px;z-index:3;display:flex;align-items:center;gap:16px">
-    ${dot(p.color, 20)}<span style="font:700 26px var(--font-display)">Replace the ball at the exit point.</span>
+  <div class="glass-strong feed-pass" style="position:absolute;left:40px;bottom:${lost.length ? 140 : 40}px;right:40px;border-radius:24px;padding:18px 24px;z-index:3;display:flex;align-items:center;gap:16px">
+    ${dot(p.color, 20)}<span style="font:700 26px var(--font-display)">Put the ball back near the exit point, or click where it is.</span>
     <span style="margin-left:auto"><button class="btn primary sm" data-action="confirm"><span>Replaced</span>${RG.btnHint("confirm")}</button></span>
   </div>
   ${lostBallBar(lost)}`;

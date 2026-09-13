@@ -185,11 +185,19 @@ def list_webcams(max_index: int = 8, probe: bool = False) -> list[dict]:
     """
     from .devices import attach_names, list_capture_names
     names = list_capture_names()
-    if names and not probe:
+    if not probe:
+        if names:
+            return [
+                {"index": i, "name": unique_device_label(names, i),
+                 "driver": n, "working": True}
+                for i, n in enumerate(names)
+            ]
+        # This platform has no name enumeration. Offer plain indices rather than
+        # falling through to the probe loop, which opens every device and fights
+        # the backend currently streaming the game.
         return [
-            {"index": i, "name": unique_device_label(names, i),
-             "driver": n, "working": True}
-            for i, n in enumerate(names)
+            {"index": i, "name": f"Camera {i}", "driver": "", "working": True}
+            for i in range(max_index)
         ]
     cams: list[dict] = []
     for i in range(max_index):
@@ -397,6 +405,9 @@ class WebcamBackend(SensorBackend):
         self._ae_manual = 0.25
         self._ae_auto = 0.75
         self._stepped_down = False
+        # Which device indices open() already negotiated, so a caller looking
+        # for a working camera does not walk the same dead devices again.
+        self.tried_indices: set[int] = {int(index)}
         self._misses = 0
         self._recovering = False
         self._recover_after = 0.0
@@ -408,7 +419,7 @@ class WebcamBackend(SensorBackend):
     def open(self) -> bool:
         # DirectShow is exclusive and can need a beat after another handle
         # (our own enumerator, Zoom, etc.) lets go.
-        tried = {int(self.index)}
+        tried = self.tried_indices = {int(self.index)}
         if self._negotiate():
             self._probe_exposure()
             self._persist_cache()

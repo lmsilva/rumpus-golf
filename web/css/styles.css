@@ -498,6 +498,17 @@ button.back-btn, button.hint {
 .feed-wrap.interactive { pointer-events: auto; cursor: crosshair; }
 .feed-wrap .feed,
 .feed-wrap .overlay { pointer-events: none; }
+/* Panels laid over an interactive feed. The user must always be able to click
+   the ball, cup or corner underneath, so the panel itself is transparent to the
+   pointer and only its controls take clicks. */
+.feed-pass { pointer-events: none; }
+.feed-pass button,
+.feed-pass input,
+.feed-pass select,
+.feed-pass textarea,
+.feed-pass a,
+.feed-pass [data-action],
+.feed-pass [tabindex] { pointer-events: auto; }
 .feed-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 560px;
@@ -515,7 +526,9 @@ button.back-btn, button.hint {
   position: absolute; right: 16px; top: 16px; z-index: 4; pointer-events: none;
   background: rgba(21, 23, 28, .72); border: 1px solid var(--line);
 }
-.feed-slot .live-pill.is-slow { color: var(--coral); border-color: rgba(255, 107, 87, .45); }
+/* Not scoped to .feed-slot: the full-bleed feed screens put the pill straight
+   on the scene, and "NO SIGNAL" has to read as a warning there too. */
+.live-pill.is-slow { color: var(--coral); border-color: rgba(255, 107, 87, .45); }
 .feed-progress {
   position: absolute; left: 0; right: 0; top: 0; height: 4px; z-index: 5;
   background: var(--mint); transform-origin: left;
@@ -569,7 +582,11 @@ button.back-btn, button.hint {
   position: absolute; left: 56px; bottom: 48px;
   display: flex; gap: 12px; z-index: 5;
 }
+/* Docked feeds tuck the hint pills into the corner. They stay clickable —
+   `pointer-events: none` here left visible buttons (Undo corner, Move corner)
+   dead to the mouse. The container passes clicks through to the feed instead. */
 .feed-slot > .hints { left: 24px; bottom: 24px; pointer-events: none; }
+.feed-slot > .hints > * { pointer-events: auto; }
 
 .status-pill {
   font: 700 13px var(--font-display); padding: 6px 10px; border-radius: 999px;

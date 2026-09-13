@@ -122,11 +122,13 @@ window.RG = window.RG || {};
     if (typeof handle === "string" && handle.startsWith("o:")) {
       const parts = handle.split(":");
       circleId = `o${parts[1]}c${parts[2]}`;
-      polyId = null;
+      const group = `o${parts[1]}`;
       idx = parseInt(parts[2], 10);
       for (const s of lastShapes) {
-        if (s.type === "polygon" && s.id && String(s.id).startsWith("obstacle_")) {
-          if (s.pts && s.pts[idx]) { s.pts[idx] = [x, y]; }
+        // Only the obstacle this handle belongs to — matching every obstacle
+        // outline made all of them jump together while dragging one corner.
+        if (s.type === "polygon" && s.group === group && s.pts && s.pts[idx]) {
+          s.pts[idx] = [x, y];
         }
         if (s.id === circleId) { s.x = x; s.y = y; }
       }
