@@ -1815,6 +1815,8 @@ class GameEngine:
             idx = int(msg.get("index", 0))
             if 0 <= idx < len(self.players):
                 self.players[idx].name = val
+        elif key == "setup_name":
+            self.setup.name = val.strip()[:48]
 
     def _handle_set(self, msg: dict) -> None:
         key = msg.get("key")
@@ -2054,7 +2056,7 @@ class GameEngine:
     def _save_setup(self) -> None:
         self.setup.players = list(self.players)
         self.setup.courses = list(self.course_ids)
-        self.setup.name = self.setup.name or "Living room"
+        self.setup.name = (self.setup.name or "").strip() or "Living room"
         self.setup.save()
 
     def _enter_hole(self) -> None:
@@ -2215,13 +2217,13 @@ class GameEngine:
         # Holed?
         if self.setup.hole is not None:
             hx, hy, hr = self.setup.hole.x, self.setup.hole.y, self.setup.hole.r
-            if np.hypot(pos[0] - hx, pos[1] - hy) < hr:
-                self.finished_hole[p.id] = True
-                self.events.append(EventType.HOLE_OUT, p.id, self.hole)
-                self._set_state(S.HOLE_OUT)
-                self._transition_next = "__advance_turn__"
-                self._transition_until = time.time() + 5.0
+            if np.hypot(pos[0] - hx, pos[1] - hy) < (hr + 0.04):
+                self._finish_player_hole(p.id, EventType.HOLE_OUT)
                 return
+        # Stroke cap ends the hole for this player.
+        if self._current_strokes(p.id) >= self.stroke_cap:
+            self._finish_player_hole(p.id, EventType.CAP)
+            return
         # Out of bounds?
         if self.setup.play_area and not point_in_polygon(pos[0], pos[1], self.setup.play_area):
             if self.settings.get("rules", "oobPenalty", default=True):
@@ -2232,20 +2234,40 @@ class GameEngine:
         # In play: advance turn.
         self._advance_turn()
 
+    def _hole_is_complete(self) -> bool:
+        return bool(self.players) and all(
+            self.finished_hole.get(p.id, False) for p in self.players
+        )
+
+    def _finish_player_hole(self, pid: str, kind: EventType) -> None:
+        self.finished_hole[pid] = True
+        self.events.append(kind, pid, self.hole)
+        if kind == EventType.HOLE_OUT:
+            self._set_state(S.HOLE_OUT)
+            self._transition_next = S.HOLE_COMPLETE if self._hole_is_complete() else "__advance_turn__"
+            self._transition_until = time.time() + 2.5
+            return
+        if self._hole_is_complete():
+            self._transition_next = None
+            self._set_state(S.HOLE_COMPLETE)
+        else:
+            self._advance_turn()
+
     def _advance_turn(self) -> None:
+        n = len(self.players)
+        for _ in range(max(1, n)):
+            if n:
+                self.active_index = (self.active_index + 1) % n
+            if n and not self.finished_hole.get(self.players[self.active_index].id, False):
+                break
+        if self._hole_is_complete():
+            self._transition_next = None
+            self._set_state(S.HOLE_COMPLETE)
+            return
         self._set_state(S.TURN_CHANGE)
         self._transition_next = S.PLAY
         self._transition_until = time.time() + 1.4
-        # Advance to the next unfinished player.
-        n = len(self.players)
-        for _ in range(n):
-            self.active_index = (self.active_index + 1) % n
-            if not self.finished_hole.get(self.players[self.active_index].id, False):
-                break
-        if all(self.finished_hole.get(p.id, False) for p in self.players):
-            self._transition_next = S.HOLE_COMPLETE
-        else:
-            self._sync_shot_arm()
+        self._sync_shot_arm()
 
     def _undo_last_shot(self) -> None:
         e = self.events.pop_last_for_hole(self.hole)
@@ -2277,6 +2299,10 @@ class GameEngine:
     # Snapshot (UI state)
     # ===================================================================== #
     def snapshot(self) -> dict[str, Any]:
+        try:
+            ui = self._ui_snapshot()
+        except Exception:
+            ui = {}
         return {
             "screen": (
                 "S07c" if self.state == S.CAL_OBSTACLES and self._selected_obstacle is not None
@@ -2293,7 +2319,7 @@ class GameEngine:
             "setup": self._setup_snapshot(),
             "game": self._game_snapshot(),
             "overlay": self._overlay_snapshot(),
-            "ui": self._ui_snapshot(),
+            "ui": ui,
         }
 
     def _setup_snapshot(self) -> dict:

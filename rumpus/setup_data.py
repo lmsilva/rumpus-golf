@@ -20,7 +20,7 @@ from .paths import SETUP_PATH
 
 @dataclass
 class Setup:
-    name: str = "Living room"
+    name: str = ""
     sensor_model: str = ""
     play_area: list[tuple[float, float]] = field(default_factory=list)
     start: Optional[CircleZone] = None
@@ -54,7 +54,7 @@ class Setup:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Setup":
         s = cls(
-            name=d.get("name", "Living room"),
+            name=d.get("name", "") or "",
             sensor_model=d.get("sensor_model", ""),
             play_area=[(p[0], p[1]) for p in d.get("play_area", [])],
             courses=d.get("courses", []),

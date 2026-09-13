@@ -271,9 +271,11 @@ window.RG = window.RG || {};
     scene.querySelectorAll("input[data-text]").forEach((el) => {
       const key = el.getAttribute("data-text");
       const index = parseInt(el.getAttribute("data-index"), 10);
+      const send = () => RG.send({ t: "text", key, index, value: el.value });
       el.addEventListener("click", (e) => e.stopPropagation());
-      el.addEventListener("change", () => RG.send({ t: "text", key, index, value: el.value }));
-      el.addEventListener("keydown", (e) => { if (e.key === "Enter") { RG.send({ t: "text", key, index, value: el.value }); el.blur(); } e.stopPropagation(); });
+      el.addEventListener("input", send);
+      el.addEventListener("change", send);
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter") { send(); el.blur(); } e.stopPropagation(); });
     });
   }
 

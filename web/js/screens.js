@@ -53,6 +53,22 @@ function hasDepth(st) {
 function marquee(text) {
   return `<span class="marquee" data-marquee><span>${esc(text)}</span></span>`;
 }
+function roomNameField(st, kicker) {
+  const name = (st.setup && st.setup.name) || "";
+  return `<label class="room-name-field">
+    <span class="kicker">${esc(kicker || "Name this room")}</span>
+    <input class="room-name" type="text" data-text="setup_name" value="${esc(name)}" placeholder="Living room" maxlength="48" autocomplete="off" spellcheck="false">
+  </label>`;
+}
+function playerFill(color) {
+  const hex = String(color || "").replace("#", "");
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  const light = Number.isFinite(r) && (r * 299 + g * 587 + b * 114) / 1000 > 186;
+  if (light) {
+    return { bg: "#15171c", fg: "#f2efe8", accent: color || "#f2efe8" };
+  }
+  return { bg: color || "var(--mint)", fg: "var(--player-text)", accent: color || "var(--mint)" };
+}
 
 // ---------------------------------------------------------------------------
 const S = {};
@@ -169,6 +185,7 @@ S.S04 = function (st) {
       <div class="kicker mint">Step 1 of 5</div>
       <h2 style="font-size:56px;margin:14px 0 20px">Clear the floor.</h2>
       <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted)">Remove balls, cup, obstacles, feet. We photograph the bare floor once so anything added later shows up as “above floor”.</div>
+      <div style="margin-top:22px">${roomNameField(st)}</div>
       <div style="margin-top:auto;display:flex;flex-direction:column;gap:12px">
         <button class="btn primary stretch" data-action="confirm"><span>${st.setup.capturing ? "Capturing…" : "Capture floor"}</span>${RG.btnHint("confirm")}</button>
         <div style="font:400 15px/1.45 var(--font-body);color:var(--text-muted)">${helper}</div>
@@ -414,6 +431,7 @@ S.S09 = function (st) {
       <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">${players.length ? `Room for ${Math.max(0, 6 - players.length)} more colors — click another ball on the camera.` : "No balls yet — click each ball on the camera to add a player."}</div>
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
+      ${roomNameField(st, "Save as")}
       <button class="btn primary stretch" data-action="confirm"${players.length ? "" : " disabled"}><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Writes rumpus-setup.json: floor plane, play area, course template, hole zone, ball hues, names.</div>
     </div>
@@ -428,7 +446,7 @@ S.S10 = function (st) {
   ${photo("s10", "saturate(.75) brightness(.8)", "linear-gradient(90deg,rgba(var(--ground-rgb),.95) 0%,rgba(var(--ground-rgb),.35) 48%,rgba(var(--ground-rgb),.6) 100%)", { opacity: 0.3 })}
   <div style="position:relative;display:grid;grid-template-columns:1fr 760px;gap:32px;padding:56px;height:100%">
     <div class="col" style="gap:20px">
-      <div class="kicker mint">Setup saved · Living room</div>
+      ${roomNameField(st, "Setup saved")}
       <h2 style="font:800 112px/1 var(--font-display);letter-spacing:-.045em">Game<br>night.</h2>
       <div>
         <div class="kicker">Holes this game</div>
@@ -531,10 +549,11 @@ function playPill(ui, motion) {
 S.S12 = function (st) {
   const p = st.ui.player || {};
   const stroke = st.ui.stroke;
+  const fill = playerFill(p.color);
   return `
   <div style="position:absolute;inset:0;background:rgba(var(--ground-rgb),.4);z-index:4"></div>
-  <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${p.color};color:var(--player-text);border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5">
-    <div class="kicker" style="color:var(--player-text);opacity:.65">Next up</div>
+  <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${fill.bg};color:${fill.fg};border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5;box-sizing:border-box;border-left:18px solid ${fill.accent}">
+    <div class="kicker" style="color:${fill.fg};opacity:.65">Next up</div>
     <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name || "Player")}</div>
     <div style="font:600 32px/1.35 var(--font-body);opacity:.8;word-spacing:0.12em">${stroke === 0 ? `Place the ${esc(p.hue_name || "next")} ball in the start zone` : `Play the ${esc(p.hue_name || "next")} ball where it lies · stroke ${stroke}`}</div>
     <div style="margin-top:28px">${RG.hint("confirm", "Skip")}</div>
@@ -547,8 +566,9 @@ S.S13 = function (st) {
   const par = st.ui.par;
   const diff = n - par;
   const sub = diff === 0 ? "On par" : diff < 0 ? "Under par — birdie!" : "Over par, still counts";
+  const fill = playerFill(p.color);
   return `
-  <div style="position:absolute;left:40px;top:40px;right:40px;background:${p.color};color:var(--player-text);border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;animation:rg-slideup .4s ease-out">
+  <div style="position:absolute;left:40px;top:40px;right:40px;background:${fill.bg};color:${fill.fg};border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;animation:rg-slideup .4s ease-out;border-left:18px solid ${fill.accent}">
     <div style="font:800 200px/1 var(--font-display);letter-spacing:-.05em">In!</div>
     <div><div style="font:800 64px/1.05 var(--font-display)">${esc(p.name)} holed in ${n}.</div>
     <div style="font:600 30px var(--font-body);opacity:.7">${sub} · Par ${par}</div></div>
@@ -705,8 +725,8 @@ S.S17 = function (st) {
       </div>
     </div>
     <div class="col" style="gap:20px">
-      ${lead ? `<div style="background:${lead.color};color:var(--player-text);border-radius:24px;padding:40px">
-        <div class="kicker" style="color:var(--player-text);opacity:.65">Leading after ${st.game.hole}</div>
+      ${lead ? `<div style="background:${playerFill(lead.color).bg};color:${playerFill(lead.color).fg};border-radius:24px;padding:40px;border-left:14px solid ${playerFill(lead.color).accent}">
+        <div class="kicker" style="color:${playerFill(lead.color).fg};opacity:.65">Leading after ${st.game.hole}</div>
         <div style="font:800 72px/1.2 var(--font-display)">${esc(lead.name)}</div>
         <div style="font:600 22px var(--font-body);opacity:.75">${lead.total} strokes · ${lead.vs_par}</div>
       </div>` : ""}
