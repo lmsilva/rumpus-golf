@@ -1,9 +1,9 @@
-"""Two-ball (up to 6-ball) detection & tracking.
+"""Ball detection & tracking.
 
-Depth-first, color-second, per the spec: a ball is a *small* above-floor blob
-whose sampled dominant hue matches a player's stored hue range. Each ball has a
-smoothed position, a plausibility gate (a ball can't teleport), a moving/stopped
-detector (2 cm over 0.5 s) and occlusion ("hidden") / loss handling.
+Depth path: small above-floor blob whose hue matches a player. Color-only
+(webcam) path: motion finds candidates, hue identifies them, a constant-velocity
+Kalman filter gates and coasts through dropouts, and a global assignment keeps
+identities from swapping when two balls pass close.
 """
 from __future__ import annotations
 
@@ -16,6 +16,118 @@ import numpy as np
 from ..models import CameraModel
 from ..vision.blobs import above_floor_mask, connected_regions, height_map
 from ..vision.geometry import FloorMapper
+
+
+# Color-only: process noise on velocity is ~0.5 m/s² so friction is followable.
+# A putt is an impulse — P also grows on a miss so the gate can re-acquire.
+# Measurement noise is ~1.5 cm.
+_ACCEL_VAR = 0.5 * 0.5
+_MEAS_VAR = 0.015 * 0.015
+_COAST_MAX_S = 0.70
+_COAST_DECAY = 0.35
+_HUE_INFEASIBLE = 35.0
+_GATE_MIN_M = 0.12
+_GATE_MAX_M = 1.20
+_START_SPEED = 0.06
+_START_DISP = 0.025
+_STOP_SPEED = 0.10
+_STOP_DISP = 0.015
+# A rolling ball can look still for a couple of frames (filter dip, dropout).
+# Stay "in play" until rest holds on real detections.
+_REST_HOLD_S = 0.40
+_REST_HITS = 8
+
+
+class BallFilter:
+    """Floor-meter constant-velocity Kalman: state [x, y, vx, vy]."""
+
+    def __init__(self) -> None:
+        self.x = np.zeros(4, dtype=np.float64)
+        self.P = np.eye(4, dtype=np.float64)
+        self.ready = False
+
+    def seed(self, pos: tuple[float, float]) -> None:
+        self.x[:] = (float(pos[0]), float(pos[1]), 0.0, 0.0)
+        self.P = np.diag([0.02 ** 2, 0.02 ** 2, 0.4 ** 2, 0.4 ** 2])
+        self.ready = True
+
+    def predict(self, dt: float) -> None:
+        if not self.ready:
+            return
+        dt = float(np.clip(dt, 1e-3, 0.25))
+        F = np.array([
+            [1.0, 0.0, dt, 0.0],
+            [0.0, 1.0, 0.0, dt],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        dt2 = dt * dt
+        dt3 = dt2 * dt
+        dt4 = dt2 * dt2
+        q = _ACCEL_VAR
+        Q = np.array([
+            [dt4 / 4.0 * q, 0.0, dt3 / 2.0 * q, 0.0],
+            [0.0, dt4 / 4.0 * q, 0.0, dt3 / 2.0 * q],
+            [dt3 / 2.0 * q, 0.0, dt2 * q, 0.0],
+            [0.0, dt3 / 2.0 * q, 0.0, dt2 * q],
+        ])
+        self.x = F @ self.x
+        self.P = F @ self.P @ F.T + Q
+
+    def decay_velocity(self, dt: float, rate: float = _COAST_DECAY) -> None:
+        if not self.ready:
+            return
+        scale = max(0.0, 1.0 - rate * float(dt))
+        self.x[2] *= scale
+        self.x[3] *= scale
+        # No measurement this frame — open the gate a little for the next one.
+        grow = (0.04 + 0.20 * self.speed * float(dt)) ** 2
+        self.P[0, 0] += grow
+        self.P[1, 1] += grow
+
+    def correct(self, pos: tuple[float, float]) -> None:
+        z = np.array([float(pos[0]), float(pos[1])])
+        if not self.ready:
+            self.seed(pos)
+            return
+        H = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+        R = np.diag([_MEAS_VAR, _MEAS_VAR])
+        y = z - H @ self.x
+        S = H @ self.P @ H.T + R
+        try:
+            K = self.P @ H.T @ np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            self.seed(pos)
+            return
+        self.x = self.x + K @ y
+        self.P = (np.eye(4) - K @ H) @ self.P
+
+    @property
+    def pos(self) -> tuple[float, float]:
+        return (float(self.x[0]), float(self.x[1]))
+
+    @property
+    def vel(self) -> tuple[float, float]:
+        return (float(self.x[2]), float(self.x[3]))
+
+    @property
+    def speed(self) -> float:
+        return float(np.hypot(self.x[2], self.x[3]))
+
+    def pos_std(self) -> float:
+        if not self.ready:
+            return 0.4
+        return float(np.sqrt(max(self.P[0, 0], self.P[1, 1], 1e-8)))
+
+    def mahalanobis(self, pos: tuple[float, float]) -> float:
+        if not self.ready:
+            return float(np.hypot(pos[0] - self.x[0], pos[1] - self.x[1]) / 0.05)
+        innov = np.array([pos[0] - self.x[0], pos[1] - self.x[1]])
+        S = self.P[:2, :2] + np.diag([_MEAS_VAR, _MEAS_VAR])
+        try:
+            return float(np.sqrt(max(0.0, innov @ np.linalg.inv(S) @ innov)))
+        except np.linalg.LinAlgError:
+            return float(np.hypot(innov[0], innov[1]) / max(self.pos_std(), 0.01))
 
 
 class TrackedBall:
@@ -36,9 +148,14 @@ class TrackedBall:
         self.hidden_estimate: tuple[float, float] | None = None
         self.lost = False
         self.held = False
+        self.coasting = False
+        self.blurred = False
         self.last_seen_t = -np.inf
         self._heading: tuple[float, float] = (0.0, 0.0)
         self._speed = 0.0
+        self._rest_since = None
+        self._rest_hits = 0
+        self.filter = BallFilter()
 
     @property
     def stopped_duration(self) -> float:
@@ -52,7 +169,12 @@ class BallTracker:
 
     def __init__(self) -> None:
         self.balls: dict[str, TrackedBall] = {}
-        self.debug: dict = {"dets": [], "masks": {}, "gate": {}}
+        self.debug: dict = {"dets": [], "masks": {}, "gate": {},
+                            "motion_mask": None, "pred": {}, "costs": []}
+        self._mog2 = cv2.createBackgroundSubtractorMOG2(
+            history=300, varThreshold=16, detectShadows=True,
+        )
+        self._last_t: float | None = None
 
     def add_ball(self, ball_id, player_id, color_hex, hue_range=None,
                  hue_center=None, sat_floor=None, val_floor=None) -> None:
@@ -71,7 +193,12 @@ class BallTracker:
             b.hidden_estimate = None
             b.lost = False
             b.held = False
+            b.coasting = False
+            b.blurred = False
             b.last_seen_t = -np.inf
+            b._rest_since = None
+            b._rest_hits = 0
+            b.filter = BallFilter()
 
     def seed_position(self, ball_id: str, pos: tuple[float, float], now: float | None = None,
                       hold: bool = False) -> None:
@@ -89,21 +216,31 @@ class BallTracker:
         ball.hidden_estimate = None
         ball.lost = False
         ball.held = bool(hold)
+        ball.coasting = False
+        ball.blurred = False
+        ball._rest_since = None
+        ball._rest_hits = 0
+        ball.filter.seed((float(pos[0]), float(pos[1])))
 
     # ------------------------------------------------------------------ #
     def update(self, color_bgr, depth_mm, mapper: FloorMapper, cam: CameraModel,
                plane, confirmed_obstacles: list, now: float | None = None,
-               play_area: list | None = None) -> None:
+               play_area: list | None = None,
+               reference_color=None) -> None:
         now = now if now is not None else time.time()
-        self.debug = {"dets": [], "masks": {}, "gate": {}}
+        dt = 1.0 / 30.0
+        if self._last_t is not None:
+            dt = float(np.clip(now - self._last_t, 1e-3, 0.25))
+        self._last_t = now
+        self.debug = {"dets": [], "masks": {}, "gate": {},
+                      "motion_mask": None, "pred": {}, "costs": []}
         if depth_mm is None:
-            # Color-only source (webcam): detect by hue mask, map via homography.
-            dets = self._detect_color(color_bgr, mapper, play_area)
-            self._match_color(dets, now)
+            self._update_color(color_bgr, mapper, play_area, reference_color, now, dt)
+            self._update_motion(now, cam, confirmed_obstacles, mapper, use_filter=True)
         else:
             detections = self._detect(color_bgr, depth_mm, mapper, cam, plane, play_area)
             self._match(detections, mapper, now)
-        self._update_motion(now, cam, confirmed_obstacles, mapper)
+            self._update_motion(now, cam, confirmed_obstacles, mapper, use_filter=False)
 
     # -- detection -------------------------------------------------------- #
     def _detect(self, color_bgr, depth_mm, mapper, cam, plane, play_area=None):
@@ -130,24 +267,286 @@ class BallTracker:
             out.append({"pos": (fx, fy), "hue": hue, "z": z})
         return out
 
-    def _detect_color(self, color_bgr, mapper, play_area=None) -> list[dict]:
-        """Color-only detection: small circular hue blobs, not the carpet.
+    def _update_color(self, color_bgr, mapper, play_area, reference_color,
+                      now: float, dt: float) -> None:
+        """Motion finds blobs; hue names them; Kalman + assignment tracks."""
+        for ball in self.balls.values():
+            if ball.filter.ready:
+                ball.filter.predict(dt)
+            self.debug["pred"][ball.id] = ball.filter.pos if ball.filter.ready else None
+            self.debug["gate"][ball.id] = self.predict_gate_radius(ball)
 
-        Prefer the blob nearest the last pose so a lamp does not steal the
-        track, but never fall back to averaging a window of beige pixels.
-        """
-        out: list[dict] = []
         if color_bgr is None or mapper is None:
-            return out
+            self._coast_or_lose(now, dt)
+            return
+
         hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+        motion_cands = self._motion_candidates(color_bgr, hsv, mapper, play_area, reference_color)
+        hue_cands = self._stationary_hue_candidates(hsv, mapper, play_area)
+        cands = self._merge_candidates(motion_cands, hue_cands)
+        assigned = self._assign_global(cands)
+
+        claimed = set()
+        for ball in self.balls.values():
+            j = assigned.get(ball.id)
+            if j is None:
+                continue
+            claimed.add(j)
+            self._accept_color(ball, cands[j], now)
+        for ball in self.balls.values():
+            if ball.id in assigned:
+                continue
+            self._miss_color(ball, now, dt)
+
+    def _motion_candidates(self, color_bgr, hsv, mapper, play_area, reference_color) -> list[dict]:
+        fg = self._mog2.apply(color_bgr)
+        motion = (fg == 255).astype(np.uint8) * 255
+        appeared = _new_object_mask(color_bgr, reference_color, loose=False)
+        combined = cv2.bitwise_or(motion, appeared)
+        area_mask = self._play_area_mask(color_bgr.shape[:2], mapper, play_area)
+        combined = cv2.bitwise_and(combined, area_mask)
+        combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        self.debug["motion_mask"] = combined
+        return self._blobs_from_motion_mask(combined, hsv, color_bgr, mapper, play_area)
+
+    def _play_area_mask(self, hw, mapper, play_area) -> np.ndarray:
+        hh, ww = hw
+        mask = np.zeros((hh, ww), np.uint8)
+        if play_area:
+            pts = []
+            for x, y in play_area:
+                u, v = mapper.floor_to_pixel(x, y)
+                pts.append([int(round(u)), int(round(v))])
+            if len(pts) >= 3:
+                cv2.fillPoly(mask, [np.array(pts, np.int32)], 255)
+            else:
+                mask[:] = 255
+        else:
+            mask[:] = 255
+        return mask
+
+    def _blobs_from_motion_mask(self, mask, hsv, color_bgr, mapper, play_area) -> list[dict]:
+        out = []
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in cnts:
+            if len(c) < 5:
+                continue
+            area = float(cv2.contourArea(c))
+            if area < 8:
+                continue
+            rect = cv2.minAreaRect(c)
+            (cx, cy), (rw, rh), _ang = rect
+            minor = float(min(rw, rh))
+            major = float(max(rw, rh))
+            if minor < 1.5:
+                continue
+            aspect = major / minor
+            if aspect > 5.0:
+                continue
+            blurred = aspect >= 2.0
+            # Streaked (blurred) blobs: use the mass centroid, not the box center.
+            if blurred:
+                mom = cv2.moments(c)
+                if mom["m00"] > 1e-3:
+                    cx = float(mom["m10"] / mom["m00"])
+                    cy = float(mom["m01"] / mom["m00"])
+            floor = mapper.pixel_to_floor(float(cx), float(cy))
+            if floor is None:
+                continue
+            fx, fy = float(floor[0]), float(floor[1])
+            if play_area and not _point_in_poly(fx, fy, play_area):
+                continue
+            exp_d = max(4.0, 2.0 * float(mapper.radius_to_pixels(fx, fy, self.BALL_DIAMETER_M / 2.0)))
+            if minor < 0.5 * exp_d or minor > 2.5 * exp_d:
+                continue
+            blob_mask = np.zeros(mask.shape, np.uint8)
+            cv2.drawContours(blob_mask, [c], -1, 255, -1)
+            hue, sat, val = sample_hsv_blob(color_bgr, blob_mask, cy, cx)
+            out.append({
+                "pos": (fx, fy), "pixel": (float(cx), float(cy)),
+                "hue": hue, "sat": sat, "val": val,
+                "blurred": blurred, "aspect": aspect, "src": "motion",
+            })
+        return out
+
+    def _stationary_hue_candidates(self, hsv, mapper, play_area) -> list[dict]:
+        """Hue-mask circular blobs — precise when the ball is sitting still."""
+        out = []
         for ball in self.balls.values():
             mask = self._ball_mask(ball, hsv)
             self.debug["masks"][ball.id] = mask
-            cands = self._circular_blobs(ball, hsv, mapper, play_area, mask=mask)
-            if not cands:
-                continue
-            out.append({"ball_id": ball.id, "cands": cands})
+            for _score, pos, cx, cy in self._circular_blobs(
+                ball, hsv, mapper, play_area, ranked=False, mask=mask,
+            ):
+                out.append({
+                    "pos": pos, "pixel": (cx, cy),
+                    "hue": ball.hue_center, "sat": ball.sat_floor or 0,
+                    "val": ball.val_floor or 0,
+                    "blurred": False, "aspect": 1.0, "src": "hue",
+                    "hint": ball.id,
+                })
         return out
+
+    def _merge_candidates(self, motion: list[dict], hue: list[dict]) -> list[dict]:
+        merged = list(motion)
+        for h in hue:
+            too_close = False
+            for m in merged:
+                if float(np.hypot(h["pos"][0] - m["pos"][0], h["pos"][1] - m["pos"][1])) < 0.06:
+                    too_close = True
+                    break
+            if not too_close:
+                merged.append(h)
+        return merged
+
+    def predict_gate_radius(self, ball: TrackedBall) -> float:
+        if ball.held:
+            return max(0.55, _GATE_MIN_M)
+        if not ball.filter.ready:
+            return 2.0
+        r = 3.0 * ball.filter.pos_std()
+        return float(np.clip(r, _GATE_MIN_M, _GATE_MAX_M))
+
+    def _hue_identity(self, ball: TrackedBall, cand: dict) -> float:
+        """Hue distance vs the sampled center. Blur drops the sat floor to 40%."""
+        hue = cand.get("hue")
+        sat = int(cand.get("sat") or 0)
+        blurred = bool(cand.get("blurred"))
+        # sat_floor is 60% of the sampled S; blur desaturates so use 40%.
+        sat_lim = int(ball.sat_floor) if ball.sat_floor is not None else 80
+        if blurred:
+            sat_lim = max(8, int(sat_lim * (0.4 / 0.6)))
+        if ball.hue_center is None:
+            return 0.0 if sat <= max(sat_lim, 40) else 40.0
+        if hue is None:
+            return 180.0
+        hd = self._hue_dist(hue, ball)
+        if ball.sat_floor is not None and sat < sat_lim:
+            return 180.0
+        return hd
+
+    def _pair_feasible(self, ball: TrackedBall, cand: dict) -> bool:
+        pred = ball.filter.pos if ball.filter.ready else (ball.position or cand["pos"])
+        gate = self.predict_gate_radius(ball)
+        if ball.position is not None or ball.filter.ready:
+            pd = float(np.hypot(cand["pos"][0] - pred[0], cand["pos"][1] - pred[1]))
+            if pd > gate:
+                return False
+        hd = self._hue_identity(ball, cand)
+        if hd > _HUE_INFEASIBLE:
+            return False
+        if cand.get("hint") and cand["hint"] != ball.id and hd > 12.0:
+            return False
+        return True
+
+    def _pair_cost(self, ball: TrackedBall, cand: dict) -> float:
+        md = ball.filter.mahalanobis(cand["pos"]) if ball.filter.ready else (
+            float(np.hypot(cand["pos"][0] - (ball.position or cand["pos"])[0],
+                           cand["pos"][1] - (ball.position or cand["pos"])[1]))
+        )
+        hd = self._hue_identity(ball, cand)
+        hue_w = 0.5 if cand.get("blurred") else 1.0
+        return md + hue_w * hd
+
+    def _assign_global(self, cands: list[dict]) -> dict[str, int]:
+        """Best assignment of balls to candidates. At most 6! = 720 tries."""
+        balls = list(self.balls.values())
+        n, m = len(balls), len(cands)
+        costs = np.full((n, m), np.inf)
+        for i, ball in enumerate(balls):
+            for j, cand in enumerate(cands):
+                if self._pair_feasible(ball, cand):
+                    costs[i, j] = self._pair_cost(ball, cand)
+                self.debug["costs"].append({
+                    "ball_id": ball.id, "pos": cand["pos"],
+                    "cost": None if not np.isfinite(costs[i, j]) else float(costs[i, j]),
+                    "ok": bool(np.isfinite(costs[i, j])),
+                })
+        best_map: dict[int, int] = {}
+        best_key = (-1, np.inf)
+
+        def rec(i: int, used: set[int], acc: float, mapping: dict[int, int]) -> None:
+            nonlocal best_map, best_key
+            if i == n:
+                # Prefer more assigned balls, then lower cost.
+                cmp = (len(mapping), -acc)
+                if cmp[0] > best_key[0] or (cmp[0] == best_key[0] and acc < best_key[1]):
+                    best_key = (cmp[0], acc)
+                    best_map = dict(mapping)
+                return
+            rec(i + 1, used, acc, mapping)
+            for j in range(m):
+                if j in used or not np.isfinite(costs[i, j]):
+                    continue
+                mapping[i] = j
+                used.add(j)
+                rec(i + 1, used, acc + float(costs[i, j]), mapping)
+                used.remove(j)
+                del mapping[i]
+
+        if n and m:
+            rec(0, set(), 0.0, {})
+        return {balls[i].id: j for i, j in best_map.items()}
+
+    def _accept_color(self, ball: TrackedBall, cand: dict, now: float) -> None:
+        pos = cand["pos"]
+        ball.filter.correct(pos)
+        ball._speed = ball.filter.speed
+        ball._heading = ball.filter.vel
+        ball.position = pos
+        if ball.smoothed is None:
+            ball.smoothed = pos
+        else:
+            a = 0.85 if ball.moving else 0.5
+            ball.smoothed = (ball.smoothed[0] * (1 - a) + pos[0] * a,
+                             ball.smoothed[1] * (1 - a) + pos[1] * a)
+        ball.history.append((now, pos[0], pos[1]))
+        ball.last_seen_t = now
+        ball.hidden = False
+        ball.hidden_estimate = None
+        ball.lost = False
+        ball.held = False
+        ball.coasting = False
+        ball.blurred = bool(cand.get("blurred"))
+        gate = self.predict_gate_radius(ball)
+        self.debug["dets"].append({
+            "ball_id": ball.id, "pos": pos, "ok": True, "gate": gate,
+            "blurred": ball.blurred,
+        })
+
+    def _miss_color(self, ball: TrackedBall, now: float, dt: float) -> None:
+        unseen = now - ball.last_seen_t if np.isfinite(ball.last_seen_t) else 1e9
+        # Coast only while the filter still thinks the ball is rolling.
+        # A miss at the end of a putt must not wipe the rest timer.
+        still_rolling = ball.filter.speed > _START_SPEED
+        if ball.moving and still_rolling and unseen <= _COAST_MAX_S and ball.filter.ready:
+            ball.filter.decay_velocity(dt)
+            pred = ball.filter.pos
+            ball.position = pred
+            ball.smoothed = pred
+            ball._speed = ball.filter.speed
+            ball._heading = ball.filter.vel
+            ball.coasting = True
+            ball.lost = False
+            self.debug["dets"].append({
+                "ball_id": ball.id, "pos": pred, "ok": True,
+                "gate": self.predict_gate_radius(ball), "coast": True,
+            })
+            return
+        ball.coasting = False
+        self._coast_or_lose_one(ball, now)
+
+    def _coast_or_lose(self, now: float, dt: float) -> None:
+        for ball in self.balls.values():
+            self._miss_color(ball, now, dt)
+
+    def _coast_or_lose_one(self, ball: TrackedBall, now: float) -> None:
+        unseen = now - ball.last_seen_t if np.isfinite(ball.last_seen_t) else 1e9
+        if ball.held and ball.position is not None and unseen > 0.05:
+            ball.lost = False
+            return
+        ball.lost = bool((unseen > 2.0) and not ball.hidden)
 
     def find_near_pixel(self, ball_id: str, color_bgr, mapper, nx: float, ny: float,
                         play_area=None) -> tuple[float, float] | None:
@@ -312,29 +711,6 @@ class BallTracker:
                 free.remove(best)
         # Balls with no match: hidden vs lost handled in _update_motion.
 
-    def _match_color(self, detections: list[dict], now: float) -> None:
-        """Assign color-only detections (already keyed by ball id)."""
-        for d in detections:
-            ball = self.balls.get(d["ball_id"])
-            if ball is None:
-                continue
-            gate = self.gate_radius(ball, now)
-            self.debug["gate"][ball.id] = gate
-            accepted = None
-            for _score, pos, _cx, _cy in d.get("cands") or []:
-                if ball.position is not None and not self._within_gate(ball, pos, now):
-                    self.debug["dets"].append({
-                        "ball_id": ball.id, "pos": pos, "ok": False, "gate": gate,
-                    })
-                    continue
-                accepted = pos
-                break
-            if accepted is not None:
-                self._accept(ball, accepted, now)
-                self.debug["dets"].append({
-                    "ball_id": ball.id, "pos": accepted, "ok": True, "gate": gate,
-                })
-
     def gate_radius(self, ball: TrackedBall, now: float) -> float:
         """Meters from last pose that a new detection may land in.
 
@@ -389,27 +765,70 @@ class BallTracker:
         ball._speed = self._recent_speed(ball)
 
     # -- motion / hidden / lost ------------------------------------------- #
-    def _update_motion(self, now, cam, confirmed_obstacles, mapper) -> None:
+    def _update_motion(self, now, cam, confirmed_obstacles, mapper, use_filter: bool = False) -> None:
         for ball in self.balls.values():
-            # Moving/stopped over a real 0.5 s of grab timestamps, not N frames.
-            cutoff = now - 0.5
-            recent = [(x, y) for (t, x, y) in ball.history if t >= cutoff]
-            moved = False
-            if len(recent) >= 2:
-                x0, y0 = recent[0]
-                x1, y1 = recent[-1]
-                disp = float(np.hypot(x1 - x0, y1 - y0))
-                # Enter moving above 3 cm; leave only below 1.5 cm.
+            if ball.coasting:
+                # A coast never ends a stroke. Keep the ball marked moving.
+                ball.moving = True
+                ball._rest_since = None
+                ball._rest_hits = 0
+                ball._speed = ball.filter.speed if ball.filter.ready else ball._speed
+            elif use_filter and ball.filter.ready:
+                spd = ball.filter.speed
+                ball._speed = spd
+                cutoff = now - 0.5
+                recent = [(x, y) for (t, x, y) in ball.history if t >= cutoff]
+                disp = 0.0
+                if len(recent) >= 2:
+                    x0, y0 = recent[0]
+                    x1, y1 = recent[-1]
+                    disp = float(np.hypot(x1 - x0, y1 - y0))
+                seen_now = np.isfinite(ball.last_seen_t) and (now - ball.last_seen_t) < 1e-6
                 if ball.moving:
-                    moved = disp >= 0.015
+                    # Sitting still (tiny 0.5 s travel) ends the stroke, even if
+                    # leftover filter speed has not quite died yet.
+                    if seen_now:
+                        if disp < _STOP_DISP and spd < _STOP_SPEED:
+                            if ball._rest_since is None:
+                                ball._rest_since = now
+                                ball._rest_hits = 1
+                            else:
+                                ball._rest_hits += 1
+                            held = (now - ball._rest_since) >= _REST_HOLD_S
+                            if held and ball._rest_hits >= _REST_HITS:
+                                ball.moving = False
+                                ball._rest_since = None
+                                ball._rest_hits = 0
+                                if ball.filter.ready:
+                                    ball.filter.x[2] = 0.0
+                                    ball.filter.x[3] = 0.0
+                                    ball._speed = 0.0
+                        else:
+                            ball._rest_since = None
+                            ball._rest_hits = 0
                 else:
-                    moved = disp >= 0.03
-            ball.moving = moved
-            if moved:
-                ball._speed = max(ball._speed, self._recent_speed(ball))
+                    ball._rest_since = None
+                    ball._rest_hits = 0
+                    ball.moving = spd > _START_SPEED and disp >= _START_DISP
+            else:
+                cutoff = now - 0.5
+                recent = [(x, y) for (t, x, y) in ball.history if t >= cutoff]
+                moved = False
+                if len(recent) >= 2:
+                    x0, y0 = recent[0]
+                    x1, y1 = recent[-1]
+                    disp = float(np.hypot(x1 - x0, y1 - y0))
+                    if ball.moving:
+                        moved = disp >= 0.015
+                    else:
+                        moved = disp >= 0.03
+                ball.moving = moved
+                if moved:
+                    ball._speed = max(ball._speed, self._recent_speed(ball))
 
-            # Occlusion: heading leads into a confirmed obstacle & not seen.
             unseen = now - ball.last_seen_t
+            if ball.coasting:
+                continue
             if ball.position is not None and unseen > 0.3 and not ball.hidden:
                 inter = self._heading_intersects(ball.position, ball._heading, confirmed_obstacles)
                 if inter is not None:
@@ -417,16 +836,9 @@ class BallTracker:
                     ball.hidden_estimate = inter
                     ball.moving = False
                     continue
-
-            # Re-acquire near a hidden estimate.
-            if ball.hidden and ball.position is not None:
-                pass  # re-acquisition happens via _match (nearby hue blob).
-
-            # A just-clicked tee stays visible for a moment if the camera
-            # has not re-acquired yet. Do not freeze motion once it has.
             if ball.held and ball.position is not None and unseen > 0.05:
                 ball.lost = False
-            else:
+            elif not use_filter:
                 ball.lost = bool((unseen > 2.0) and not ball.hidden)
 
     def _heading_intersects(self, pos, heading, obstacles):
@@ -453,6 +865,11 @@ class BallTracker:
             return None
         img = color_bgr.copy()
         hh, ww = img.shape[:2]
+        motion = self.debug.get("motion_mask")
+        if motion is not None and getattr(motion, "shape", None) == (hh, ww):
+            tint = np.zeros_like(img)
+            tint[motion > 0] = (40, 200, 40)
+            cv2.addWeighted(tint, 0.22, img, 1.0, 0, img)
         for ball in self.balls.values():
             mask = self.debug.get("masks", {}).get(ball.id)
             if mask is None or mask.shape[:2] != (hh, ww):
@@ -473,20 +890,40 @@ class BallTracker:
             pt = (int(round(u)), int(round(v)))
             ok = bool(det.get("ok"))
             color = (139, 233, 195) if ok else (87, 107, 255)
+            if det.get("coast"):
+                color = (80, 200, 255)
             cv2.circle(img, pt, 10, color, 2 if ok else 1)
-            cv2.putText(img, "ok" if ok else "no", (pt[0] + 8, pt[1] - 8),
+            label = "coast" if det.get("coast") else ("ok" if ok else "no")
+            cv2.putText(img, label, (pt[0] + 8, pt[1] - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+        for c in self.debug.get("costs") or []:
+            pos = c.get("pos")
+            if pos is None or mapper is None or c.get("cost") is None:
+                continue
+            u, v = mapper.floor_to_pixel(pos[0], pos[1])
+            cv2.putText(img, f"{c['ball_id']}:{c['cost']:.1f}",
+                        (int(u) + 6, int(v) + 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (242, 239, 232), 1, cv2.LINE_AA)
         now = time.time()
         for ball in self.balls.values():
-            pos = ball.smoothed or ball.position
+            pred = (self.debug.get("pred") or {}).get(ball.id)
+            pos = pred or ball.smoothed or ball.position
             if pos is None or mapper is None:
                 continue
-            gate = float(self.debug.get("gate", {}).get(ball.id, self.gate_radius(ball, now)))
+            gate = float(self.debug.get("gate", {}).get(
+                ball.id,
+                self.predict_gate_radius(ball) if ball.filter.ready else self.gate_radius(ball, now),
+            ))
             u, v = mapper.floor_to_pixel(pos[0], pos[1])
+            pu, pv = int(round(u)), int(round(v))
+            if pred is not None:
+                cv2.drawMarker(img, (pu, pv), (255, 220, 80), cv2.MARKER_CROSS, 14, 2)
             r_px = max(6.0, float(mapper.radius_to_pixels(pos[0], pos[1], gate)))
-            cv2.circle(img, (int(round(u)), int(round(v))), int(r_px), (242, 239, 232), 1)
-            cv2.putText(img, f"{ball.id} r={gate:.2f}m",
-                        (int(u) + 8, int(v) + 16),
+            cv2.ellipse(img, (pu, pv), (int(r_px), int(r_px)), 0, 0, 360, (242, 239, 232), 1)
+            tag = f"{ball.id} r={gate:.2f}m"
+            if ball.coasting:
+                tag += " coast"
+            cv2.putText(img, tag, (pu + 8, pv + 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (242, 239, 232), 1, cv2.LINE_AA)
         if fps is not None:
             cv2.putText(img, f"{fps:.1f} fps", (16, 32),
@@ -541,10 +978,10 @@ def classify_ball_swatch(bgr: tuple[int, int, int], loose: bool = False) -> dict
 
 
 def _name_allowed_ball(h: int, s: int, v: int, loose: bool = False) -> str | None:
-    s_white = 40 if loose else 28
-    v_white = 190 if loose else 210
-    s_neon = 90 if loose else 125
-    v_neon = 130 if loose else 155
+    s_white = 80 if loose else 28
+    v_white = 155 if loose else 210
+    s_neon = 70 if loose else 170
+    v_neon = 110 if loose else 160
     if s <= s_white and v >= v_white:
         return "white"
     if s < s_neon or v < v_neon:
@@ -563,16 +1000,68 @@ def _name_allowed_ball(h: int, s: int, v: int, loose: bool = False) -> str | Non
     return None
 
 
-def _allowed_ball_mask(hsv: np.ndarray) -> np.ndarray:
-    """Pixels that look like a white or neon ball — not a beige floor."""
+def _allowed_ball_mask(hsv: np.ndarray, loose: bool = False) -> np.ndarray:
+    """Hue window only. Oak lives in the orange band — never use this alone."""
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    white = (s <= 28) & (v >= 210)
-    sat = (s >= 125) & (v >= 155)
+    if loose:
+        white = (s <= 80) & (v >= 150)
+        sat = (s >= 55) & (v >= 100)
+    else:
+        white = (s <= 40) & (v >= 190)
+        sat = (s >= 70) & (v >= 120)
     orange = sat & (h >= 8) & (h <= 24)
     yellow = sat & (h >= 22) & (h <= 38)
     pink = sat & ((h >= 150) | (h <= 8))
     blue = sat & (h >= 95) & (h <= 128)
     return (white | orange | yellow | pink | blue).astype(np.uint8) * 255
+
+
+def _new_object_mask(color_bgr, reference_bgr, loose: bool = False) -> np.ndarray:
+    """Pixels that changed versus the empty floor, ignoring a global exposure shift."""
+    hh, ww = color_bgr.shape[:2]
+    if reference_bgr is None or reference_bgr.shape != color_bgr.shape:
+        hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+        blur = cv2.GaussianBlur(hsv, (31, 31), 0)
+        gap = 16 if loose else 26
+        pop = (hsv[..., 1] > blur[..., 1] + gap) | (hsv[..., 2] > blur[..., 2] + gap)
+        return pop.astype(np.uint8) * 255
+    diff = cv2.absdiff(color_bgr, reference_bgr)
+    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    # A room-light change lifts every pixel; require a bump above the frame median.
+    med = float(np.median(gray))
+    thr = med + (8 if loose else 14)
+    return (gray > thr).astype(np.uint8) * 255
+
+
+def _blob_pops_from_floor(hsv, blob_mask, cy: float, cx: float, r_px: float) -> bool:
+    """True when the blob is neon-er or brighter than the ring around it."""
+    hh, ww = blob_mask.shape
+    inner = blob_mask > 0
+    if int(inner.sum()) < 8:
+        return False
+    yy, xx = np.ogrid[:hh, :ww]
+    dist = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    ring = (dist > r_px * 1.15) & (dist < r_px * 2.6) & (~inner)
+    if int(ring.sum()) < 12:
+        return True
+    s_in = float(np.median(hsv[..., 1][inner]))
+    v_in = float(np.median(hsv[..., 2][inner]))
+    s_out = float(np.median(hsv[..., 1][ring]))
+    v_out = float(np.median(hsv[..., 2][ring]))
+    sat_delta = s_in - s_out
+    val_delta = v_in - v_out
+    # Neon pops by saturation; a white ball pops by being brighter / less sat.
+    return sat_delta >= 32 or val_delta >= 28 or (s_in <= 55 and val_delta >= 16)
+
+
+def _blob_is_new(color_bgr, reference_bgr, blob_mask) -> bool:
+    """Reject blobs that already existed on the empty-floor reference."""
+    if reference_bgr is None or reference_bgr.shape != color_bgr.shape:
+        return True
+    diff = cv2.absdiff(color_bgr, reference_bgr)
+    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    vals = gray[blob_mask > 0]
+    return vals.size > 0 and float(np.median(vals)) >= 20
 
 
 def detect_setup_balls(
@@ -581,10 +1070,12 @@ def detect_setup_balls(
     mapper: FloorMapper,
     play_area: list[tuple[float, float]] | None,
     cup: tuple[float, float, float] | None = None,
+    loose: bool = False,
 ) -> list[dict]:
     """Find white / neon golf balls on a color frame for the S09 assign step.
 
-    Hue + saturation only — no floor differencing (that matched carpet).
+    A blob must look like a ball *and* stand off the floor (and the empty
+    reference, when we have one). Hue alone matches oak grain.
     """
     if color_bgr is None or mapper is None:
         return []
@@ -603,7 +1094,9 @@ def detect_setup_balls(
         area_mask[:] = 255
 
     hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.bitwise_and(_allowed_ball_mask(hsv), area_mask)
+    color_ok = _allowed_ball_mask(hsv, loose=loose)
+    appeared = _new_object_mask(color_bgr, reference_bgr, loose=loose)
+    mask = cv2.bitwise_and(cv2.bitwise_and(color_ok, appeared), area_mask)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
@@ -615,6 +1108,7 @@ def detect_setup_balls(
     r_px = max(4.0, float(mapper.radius_to_pixels(cx, cy, 0.0215)))
     min_a = max(18.0, np.pi * (r_px * 0.4) ** 2)
     max_a = np.pi * (r_px * 2.4) ** 2
+    min_circ = 0.50 if loose else 0.62
 
     out: list[dict] = []
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -626,7 +1120,7 @@ def detect_setup_balls(
         if peri < 8:
             continue
         circ = 4.0 * np.pi * area / (peri * peri)
-        if circ < 0.58:
+        if circ < min_circ:
             continue
         m = cv2.moments(c)
         if m["m00"] == 0:
@@ -640,16 +1134,46 @@ def detect_setup_balls(
             continue
         if cup is not None and np.hypot(floor[0] - cup[0], floor[1] - cup[1]) < cup[2] + 0.06:
             continue
-        ix, iy = int(np.clip(px, 0, ww - 1)), int(np.clip(py, 0, hh - 1))
-        bgr = tuple(int(x) for x in color_bgr[iy, ix])
-        swatch = classify_ball_swatch(bgr)
-        if swatch is None:
-            continue
         blob_mask = np.zeros((hh, ww), np.uint8)
         cv2.drawContours(blob_mask, [c], -1, 255, -1)
+        if not _blob_pops_from_floor(hsv, blob_mask, py, px, max(r_px, (area / np.pi) ** 0.5)):
+            continue
+        if not loose and not _blob_is_new(color_bgr, reference_bgr, blob_mask):
+            continue
+        inner = blob_mask > 0
+        med = np.median(color_bgr[inner], axis=0)
+        bgr = tuple(int(x) for x in med)
+        swatch = classify_ball_swatch(bgr, loose=loose)
+        if swatch is None:
+            continue
+        if not loose and swatch.get("hue_name") == "orange":
+            # Wood grain is streaky; a neon ball is a flat color chip.
+            gray = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2GRAY)
+            if float(np.std(gray[inner])) > 32:
+                continue
         sampled = attach_sampled_hsv(color_bgr, blob_mask, py, px, swatch)
-        out.append({"pos": (float(floor[0]), float(floor[1])), **sampled})
+        out.append({"pos": (float(floor[0]), float(floor[1])),
+                    "pixel": (float(px), float(py)), **sampled})
     return out
+
+
+def nearest_setup_ball(dets: list[dict], mapper, u: float, v: float,
+                       max_px: float = 56.0) -> dict | None:
+    """Detection whose centroid is closest to a click, or None if too far."""
+    best, best_d = None, float(max_px)
+    for det in dets:
+        pos = det.get("pos")
+        pix = det.get("pixel")
+        if pix is not None:
+            pu, pv = float(pix[0]), float(pix[1])
+        elif pos is not None and mapper is not None:
+            pu, pv = mapper.floor_to_pixel(pos[0], pos[1])
+        else:
+            continue
+        d = float(np.hypot(pu - u, pv - v))
+        if d < best_d:
+            best, best_d = det, d
+    return best
 
 
 def hue_circular_dist(a: float, b: float) -> float:
@@ -711,18 +1235,30 @@ def attach_sampled_hsv(color_bgr, mask, cy, cx, swatch: dict) -> dict:
 
 
 def sample_ball_at_pixel(color_bgr, u: float, v: float) -> dict | None:
-    """Classify + sample a clicked pixel (S09 manual assign)."""
+    """Classify + sample a clicked neighborhood (S09 manual assign).
+
+    A single pixel is the wrong test: a highlight, a miss by a few pixels, or
+    warm floor spill all fail. Use the median of a disk, and only accept it
+    if that disk stands off the floor the way a ball does.
+    """
     if color_bgr is None:
         return None
     hh, ww = color_bgr.shape[:2]
     ix = int(np.clip(u, 0, ww - 1))
     iy = int(np.clip(v, 0, hh - 1))
-    bgr = tuple(int(x) for x in color_bgr[iy, ix])
+    mask = np.zeros((hh, ww), np.uint8)
+    cv2.circle(mask, (ix, iy), 14, 255, -1)
+    inner = mask > 0
+    if int(inner.sum()) < 8:
+        return None
+    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+    if not _blob_pops_from_floor(hsv, mask, float(iy), float(ix), 14.0):
+        return None
+    med = np.median(color_bgr[inner], axis=0)
+    bgr = tuple(int(x) for x in med)
     swatch = classify_ball_swatch(bgr, loose=True)
     if swatch is None:
         return None
-    mask = np.zeros((hh, ww), np.uint8)
-    cv2.circle(mask, (ix, iy), 12, 255, -1)
     return attach_sampled_hsv(color_bgr, mask, iy, ix, swatch)
 
 

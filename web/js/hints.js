@@ -10,6 +10,7 @@ const VERBS = {
   next:      { key: "Tab",    pad: "RB", cls: "g-gray", shape: "rect" },
   prev:      { key: "Shift ⇥", pad: "LB", cls: "g-gray", shape: "rect" },
   menu:      { key: "Esc",    pad: "≡",  cls: "g-gray", shape: "circle" },
+  settings:  { key: "S",      pad: "≡",  cls: "g-gray", shape: "circle" },
   stick:     { key: "← ↑ → ↓", pad: "L", cls: "g-gray", shape: "circle" },
 };
 

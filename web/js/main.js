@@ -33,6 +33,7 @@ window.RG = window.RG || {};
 
   // ---- state handling ----
   function onState(st) {
+    if (!st || !st.screen) return;
     state = st;
     RG.settings = st.settings || RG.settings;
     applyTheme(st.settings && st.settings.theme);
@@ -45,8 +46,18 @@ window.RG = window.RG || {};
     if (rebuild) {
       const screenChanged = screen !== lastScreen;
       const keep = focusKey(document.activeElement);
+      const keepScroll = (!screenChanged && screen === "S19")
+        ? ((scene.querySelector(".s19-main") || {}).scrollTop || 0)
+        : 0;
+      let html = "";
+      try {
+        html = RG.screens.render(st);
+      } catch (err) {
+        console.error("render failed", screen, err);
+        return;
+      }
       if (RG.feed && RG.feed.detach) RG.feed.detach();
-      scene.innerHTML = RG.screens.render(st);
+      scene.innerHTML = html;
       lastScreen = screen;
       lastSignature = sig;
       wire();
@@ -57,6 +68,11 @@ window.RG = window.RG || {};
         /* mint highlight is server-driven — follow it, not the old DOM node */
       } else if (!restoreFocus(keep)) {
         focusFirst();
+        if (!scene.querySelector(".kb-focus")) requestAnimationFrame(focusFirst);
+      }
+      if (screen === "S19" && keepScroll) {
+        const pane = scene.querySelector(".s19-main");
+        if (pane) pane.scrollTop = keepScroll;
       }
       if (screenChanged) {
         rumbleFor(screen);
@@ -69,17 +85,22 @@ window.RG = window.RG || {};
     RG.feed.overlay((st.overlay && st.overlay.shapes) || []);
     patchS05(st);
     patchS11(st);
+    patchS19(st);
     handleMusic(st);
+    syncSettingsFab(screen);
   }
 
   function signature(st) {
     if (st.screen === "S19") return settingsSig(st);
+    if (st.screen === "S02") {
+      return `${(st.sensor && st.sensor.model) || ""}|${st.sensor_status || ""}|${(st.ui && st.ui.opening) ? 1 : 0}`;
+    }
     if (st.screen === "S04") return st.setup && st.setup.capturing ? "cap" : "";
     if (st.screen === "S05") {
       const n = (st.ui && st.ui.corners) || 0;
       return `${(st.ui && st.ui.preset) || ""}|${(st.ui && st.ui.color_only) ? 1 : 0}|${n}`;
     }
-    if (st.screen === "S06") return (st.game && st.game.course_id) || "";
+    if (st.screen === "S06") return `${(st.game && st.game.course_id) || ""}|${st.ui && st.ui.recalibrating ? 1 : 0}`;
     if (st.screen === "S07") return `${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
     if (st.screen === "S08") return `${(st.ui && st.ui.has_hole) ? 1 : 0}|${(st.ui && st.ui.searching) ? 1 : 0}|${(st.ui && st.ui.manual) ? 1 : 0}`;
     if (st.screen === "S10") return [(st.ui && st.ui.holes), (st.ui && st.ui.stroke_cap)].join("|");
@@ -89,7 +110,7 @@ window.RG = window.RG || {};
     }
     if (st.screen === "S09") {
       const ps = (st.ui && st.ui.players) || [];
-      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}|${st.ui && st.ui.hue_clash ? 1 : 0}`;
+      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}|${st.ui && st.ui.hue_clash ? 1 : 0}|${st.ui && st.ui.recalibrating ? 1 : 0}`;
     }
     if (st.screen === "S14") return String(((st.ui && st.ui.lost_balls) || []).length);
     if (st.screen === "S15") return `${st.ui && st.ui.focus}|${st.ui && st.ui.recal_flyout ? 1 : 0}`;
@@ -115,7 +136,7 @@ window.RG = window.RG || {};
       cam.active_device, cam.resolution, cam.backend, names,
       cam.is_mock, cam.error, st.sensor && st.sensor.model,
       cam.lock_notice, cam.locked, cam.exposure_control, cam.show_driver_settings,
-      cam.fourcc, cam.capture_api, cam.actual_resolution, cam.measured_fps,
+      cam.fourcc, cam.capture_api, cam.actual_resolution, cam.exposure,
       s.display && s.display.debugOverlay,
     ].join("|");
   }
@@ -148,6 +169,50 @@ window.RG = window.RG || {};
     scene.querySelectorAll("button.btn[data-action=confirm]").forEach((btn) => {
       btn.disabled = colorOnly && n < 4;
     });
+  }
+
+  function liveRateText(st) {
+    const cam = (st.ui && st.ui.camera) || {};
+    const fps = cam.measured_fps != null ? cam.measured_fps : (st.sensor && st.sensor.fps);
+    const w = (st.feed && st.feed.w) || 0;
+    const h = (st.feed && st.feed.h) || 0;
+    const size = (w && h) ? `${w} × ${h}` : "";
+    if (fps == null) return size ? `LIVE · ${size}` : "LIVE";
+    const fpsTxt = Number(fps).toFixed(1);
+    return size ? `LIVE · ${size} · ${fpsTxt} fps` : `LIVE · ${fpsTxt} fps`;
+  }
+
+  function syncSettingsFab(screen) {
+    const hide = screen === "S19" || screen === "S20" || screen === "S21" || screen === "S15";
+    const has = !!scene.querySelector("[data-action=settings]:not(#rg-settings)");
+    let fab = scene.querySelector("#rg-settings");
+    if (hide || has) {
+      if (fab) fab.remove();
+      return;
+    }
+    if (!fab) {
+      fab = document.createElement("button");
+      fab.id = "rg-settings";
+      fab.type = "button";
+      fab.className = "always-settings";
+      fab.addEventListener("click", (e) => {
+        RG.audio.sfx("click");
+        RG.send({ t: "action", a: "settings" });
+        e.stopPropagation();
+      });
+      scene.appendChild(fab);
+    }
+    fab.innerHTML = `${RG.glyph("settings")}<span>Settings</span>`;
+  }
+
+  function patchS19(st) {
+    if (st.screen !== "S19") return;
+    const el = scene.querySelector("[data-live-rate]");
+    if (!el) return;
+    const cam = (st.ui && st.ui.camera) || {};
+    const fps = cam.measured_fps != null ? cam.measured_fps : (st.sensor && st.sensor.fps);
+    el.textContent = liveRateText(st);
+    el.classList.toggle("is-slow", fps != null && Number(fps) < 20);
   }
 
   function playStatusText(st) {
@@ -468,8 +533,38 @@ window.RG = window.RG || {};
     if (state && state.screen === "S06" && focusSelectedCourse()) return;
     if (state && state.screen === "S15" && focusPauseRow(state)) return;
     const els = focusables();
-    const first = els.find((el) => el.tagName === "BUTTON" && el.getAttribute("data-action") !== "back") || els[0];
+    const first = els.find((el) => el.tagName === "BUTTON" && el.getAttribute("data-action") !== "back" && el.getAttribute("data-action") !== "settings")
+      || els.find((el) => el.classList.contains("btn") && el.getAttribute("data-action") === "back")
+      || els.find((el) => el.getAttribute("data-action") === "back")
+      || els[0];
     if (first) activate(first);
+  }
+  function isActivatable(el) {
+    if (!el || !el.getAttribute || !scene.contains(el)) return false;
+    if (el.disabled || el.getAttribute("aria-hidden") === "true") return false;
+    return el.tagName === "BUTTON" || el.hasAttribute("data-action") || el.tabIndex >= 0;
+  }
+  function defaultControl() {
+    return scene.querySelector("button.btn.primary[data-action]")
+      || scene.querySelector("button[data-action=new_game]")
+      || scene.querySelector(".kb-focus")
+      || scene.querySelector("button.btn[data-action]:not([data-action=back])");
+  }
+  function currentControl() {
+    const ae = document.activeElement;
+    if (isActivatable(ae) && ae !== document.body && ae !== document.documentElement) return ae;
+    return scene.querySelector(".kb-focus") || defaultControl();
+  }
+  function fireControl(el) {
+    if (!el) return false;
+    if (el.classList.contains("course-card")) {
+      const btn = el.querySelector("[data-action=confirm]");
+      if (btn) { btn.click(); return true; }
+      RG.send({ t: "action", a: "confirm", index: parseInt(el.getAttribute("data-index"), 10) });
+      return true;
+    }
+    el.click();
+    return true;
   }
   function scrollPane(dir) {
     const ae = document.activeElement;
@@ -528,21 +623,11 @@ window.RG = window.RG || {};
     if (key === "PageDown") { e.preventDefault(); scrollPane(1); return; }
     if (key === "PageUp") { e.preventDefault(); scrollPane(-1); return; }
 
-    // Activate the focused control, else send a generic confirm.
+    // Activate the focused / remembered control. Body focus is common after
+    // clicking the letterbox — still fire the highlighted menu row.
     if (key === "Enter" || key === " ") {
-      if (ae && ae.classList && ae.classList.contains("course-card")) {
-        e.preventDefault();
-        const btn = ae.querySelector("[data-action=confirm]");
-        if (btn) btn.click();
-        else RG.send({ t: "action", a: "confirm", index: parseInt(ae.getAttribute("data-index"), 10) });
-        return;
-      }
-      if (ae && ae !== document.body && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
-        e.preventDefault();
-        ae.click();
-      } else {
-        RG.send({ t: "action", a: "confirm" });
-      }
+      e.preventDefault();
+      if (!fireControl(currentControl())) RG.send({ t: "action", a: "confirm" });
       return;
     }
 
@@ -554,7 +639,7 @@ window.RG = window.RG || {};
       if (key === "f") { RG.send({ t: "action", a: "fix" }); return; }
       if (key === "r") { RG.send({ t: "action", a: "recalibrate" }); return; }
       if (key === "c") { RG.send({ t: "action", a: "course" }); return; }
-      if (key === "m") { RG.send({ t: "action", a: "music" }); return; }
+      if (key === "m" || key === "s") { RG.send({ t: "action", a: "settings" }); return; }
       if (key === "q") { RG.send({ t: "action", a: "quit" }); return; }
     }
     if ((screen === "S07c" || screen === "S07b") && (key === "Delete" || key === "Backspace")) {
@@ -563,6 +648,7 @@ window.RG = window.RG || {};
     }
 
     // Global shortcuts (work regardless of focus)
+    if (key === "s") { RG.send({ t: "action", a: "settings" }); return; }
     if (key === "z" || key === "r") { RG.send({ t: "action", a: "undo" }); return; }
     if (key === "y" || key === "d") { RG.send({ t: "action", a: "secondary" }); return; }
     if (key === "f") { toggleFullscreen(); return; }
@@ -631,18 +717,7 @@ window.RG = window.RG || {};
   function dispatchPad(verb) {
     scene.classList.remove("mouse-nav");
     if (verb === "confirm") {
-      const ae = document.activeElement;
-      if (ae && ae.classList && ae.classList.contains("course-card")) {
-        const btn = ae.querySelector("[data-action=confirm]");
-        if (btn) btn.click();
-        else RG.send({ t: "action", a: "confirm", index: parseInt(ae.getAttribute("data-index"), 10) });
-        return;
-      }
-      if (ae && scene.contains(ae) && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
-        ae.click();
-      } else {
-        RG.send({ t: "action", a: "confirm" });
-      }
+      if (!fireControl(currentControl())) RG.send({ t: "action", a: "confirm" });
       return;
     }
     if (verb === "next" || verb === "prev") {

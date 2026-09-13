@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import socket
 import struct
 import threading
 import time
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
@@ -232,6 +234,44 @@ def test_text_inputs_trimmed_and_capped():
     assert e.setup.name == "x" * 40
 
 
+def test_boot_menu_works_while_camera_opens():
+    """Boot actions must apply during the webcam sweep, not after it."""
+    from rumpus.sensor.mock import MockBackend
+
+    def slow_create(*_args, **_kwargs):
+        time.sleep(1.6)
+        return MockBackend(), "mock"
+
+    with patch("rumpus.server.create_backend", side_effect=slow_create):
+        with _Server() as srv:
+            status, sock, rest = _ws_handshake(srv.port)
+            assert status == 101 and sock is not None
+            _ws_read_frames(sock, rest, limit=2)
+            _ws_send_text(sock, '{"t":"action","a":"settings"}')
+            sock.settimeout(0.4)
+            deadline = time.time() + 1.1
+            leftover = b""
+            found = False
+            while time.time() < deadline and not found:
+                try:
+                    frames = _ws_read_frames(sock, leftover, limit=8)
+                except (TimeoutError, OSError, socket.timeout):
+                    frames = []
+                leftover = b""
+                for op, payload in frames:
+                    if op != 0x1:
+                        continue
+                    try:
+                        st = json.loads(payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if st.get("screen") == "S19" or st.get("state") == "SETTINGS":
+                        found = True
+                        break
+            sock.close()
+            assert found, "Settings should open before camera negotiation finishes"
+
+
 def test_malformed_set_does_not_raise():
     e = GameEngine()
     e.handle_input({"t": "set", "key": "holes", "value": "nope"})
@@ -246,5 +286,6 @@ if __name__ == "__main__":
     test_lan_token_required_on_index_and_ws()
     test_huge_ws_message_closes_without_killing_loop()
     test_text_inputs_trimmed_and_capped()
+    test_boot_menu_works_while_camera_opens()
     test_malformed_set_does_not_raise()
     print("ok")

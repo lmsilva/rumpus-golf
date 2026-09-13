@@ -107,9 +107,9 @@ class Broadcaster:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.state_json = "{}"
+        self.state_json = ""
         self.frame: bytes | None = None
-        self.seq = 0
+        self.seq = -1
 
     def publish(self, state: dict, frame: bytes | None) -> None:
         with self._lock:
@@ -131,7 +131,8 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
     input_queue: queue.Queue = queue.Queue(maxsize=INPUT_QUEUE_SIZE)
     stop = threading.Event()
 
-    def init_sensor() -> None:
+    def open_sensor():
+        """Open the camera off the game loop so the boot menu stays interactive."""
         cfg = engine.settings.get("camera", default={}) or {}
         idx = camera_index if camera_index is not None else int(cfg.get("device", 0))
         res = camera_res if camera_res is not None else str(cfg.get("resolution", "1280x720"))
@@ -144,49 +145,126 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
             settings=engine.settings,
         )
         if backend is None:
-            engine.sensor_status = "none"
-            return
+            return None, None
+        # MSMF/DirectShow handles are thread-affine. Drop the worker's handle
+        # so the game loop can reopen on the thread that actually grabs.
+        detach = getattr(backend, "detach_handle", None)
+        if callable(detach):
+            detach()
         cam = getattr(backend, "cam", None) or default_camera(
             backend.description.depth_res if backend.description.depth_res != (0, 0)
             else backend.description.color_res
         )
-        engine.attach_backend(backend, cam)
+        return backend, cam
 
     def loop() -> None:
-        init_sensor()
+        def drain_input() -> None:
+            last_move = None
+            while True:
+                try:
+                    msg = input_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if msg.get("t") == "pointer" and msg.get("type") == "move":
+                    last_move = msg
+                else:
+                    engine.handle_input(msg)
+            if last_move is not None:
+                engine.handle_input(last_move)
+
+        def publish(frame=None) -> None:
+            jpeg = None
+            if frame is not None:
+                try:
+                    jpeg = engine.encode_frame()
+                except Exception:
+                    jpeg = None
+            try:
+                state = engine.snapshot()
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                return
+            broadcaster.publish(state, jpeg)
+
+        opened = {"done": False, "backend": None, "cam": None, "error": None}
+        engine.sensor_status = "opening"
+
+        def init_worker() -> None:
+            try:
+                backend, cam = open_sensor()
+                opened["backend"] = backend
+                opened["cam"] = cam
+            except Exception as exc:
+                opened["error"] = exc
+            opened["done"] = True
+
+        # Webcam negotiation can take 30–60 s. Keep publishing + draining
+        # input on this thread so New game / Settings / etc. work immediately.
+        threading.Thread(target=init_worker, daemon=True, name="rumpus-sensor-init").start()
+        try:
+            publish()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+        attached = False
         while not stop.is_set():
-            frame = engine.grab_frame()
-            if frame is None:
-                time.sleep(0.1)
-                continue
-            interval = 1.0 / max(10.0, min(30.0, float(engine.backend.description.fps))) if engine.backend else 0.1
-
-            def drain_input() -> None:
-                last_move = None
-                while True:
+            if opened["done"] and not attached:
+                attached = True
+                if opened["error"] is not None:
+                    import traceback
+                    traceback.print_exception(opened["error"])
+                    engine.sensor_status = "none"
+                    engine._camera_error = (
+                        "Could not open the camera. Close Zoom / Teams / Iriun "
+                        "if it has the device, then press Retry."
+                    )
+                elif opened["backend"] is None:
+                    engine.sensor_status = "none"
+                    engine._camera_error = (
+                        "Could not open the camera. Close Zoom / Teams / Iriun "
+                        "if it has the device, then press Retry."
+                    )
+                else:
                     try:
-                        msg = input_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                    if msg.get("t") == "pointer" and msg.get("type") == "move":
-                        last_move = msg
-                    else:
-                        engine.handle_input(msg)
-                if last_move is not None:
-                    engine.handle_input(last_move)
-
+                        backend = opened["backend"]
+                        reopen = getattr(backend, "reopen_on_this_thread", None)
+                        if callable(reopen):
+                            if not reopen(full=False) and not reopen(full=True):
+                                raise RuntimeError("webcam reopen failed")
+                        engine.attach_backend(backend, opened["cam"])
+                    except Exception:
+                        import traceback
+                        traceback.print_exc()
+                        engine.sensor_status = "none"
+                        engine.backend = None
+                        engine.sensor_desc = None
+                        engine._camera_error = (
+                            "Could not open the camera. Close Zoom / Teams / Iriun "
+                            "if it has the device, then press Retry."
+                        )
+            frame = engine.grab_frame()
+            interval = 0.1
+            if engine.backend is not None:
+                try:
+                    interval = 1.0 / max(
+                        10.0, min(30.0, float(engine.backend.description.fps))
+                    )
+                except Exception:
+                    interval = 0.1
             try:
                 drain_input()
-                engine.tick(frame)
+                if frame is not None:
+                    engine.tick(frame)
                 drain_input()
-                jpeg = engine.encode_frame()
-                broadcaster.publish(engine.snapshot(), jpeg)
+                publish(frame)
             except Exception:
                 import traceback
                 traceback.print_exc()
                 time.sleep(0.2)
                 continue
-            time.sleep(interval)
+            time.sleep(interval if frame is not None else 0.1)
 
     thread = threading.Thread(target=loop, daemon=True)
 
@@ -263,7 +341,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                 traceback.print_exc()
                 break
             seq, state_json, frame = broadcaster.latest()
-            if seq != last_seq:
+            if seq != last_seq and seq >= 0 and state_json:
                 await websocket.send_text(state_json)
                 if frame is not None:
                     await websocket.send_bytes(frame)

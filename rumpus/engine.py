@@ -29,7 +29,8 @@ from .sensor.base import SensorBackend
 from .sensor.mock import MockBackend, hex_to_bgr
 from .setup_data import Setup
 from .vision.ball_tracker import (
-    BallTracker, detect_setup_balls, hue_clash_pairs, sample_ball_at_pixel,
+    BallTracker, detect_setup_balls, hue_clash_pairs, nearest_setup_ball,
+    sample_ball_at_pixel,
 )
 from .vision.floor import fit_floor_plane
 from .vision.geometry import (CameraModel, FloorMapper, HomographyMapper,
@@ -82,11 +83,19 @@ CAL_STATES = {
     S.CAL_OBSTACLES, S.CAL_CUP, S.CAL_BALLS,
 }
 
-# Esc / Menu opens pause so the player can quit or recalibrate.
-IN_GAME_STATES = {
-    S.GAME_START, S.HOLE_START, S.PLAY, S.TURN_CHANGE,
+# Esc / Menu opens pause during a live hole. GAME_START is still "game
+# night" setup — Back returns to ball assignment; Menu still pauses.
+PAUSE_ON_BACK = {
+    S.HOLE_START, S.PLAY, S.TURN_CHANGE,
     S.HOLE_OUT, S.OOB, S.HOLE_COMPLETE,
 }
+PLAYABLE_ROUND = PAUSE_ON_BACK | {S.GAME_START}
+# Celebration overlays are not a useful resume target after recalibrate.
+RESUME_FROM_RECAL = {
+    S.TURN_CHANGE: S.PLAY,
+    S.HOLE_OUT: S.PLAY,
+}
+IN_GAME_STATES = PLAYABLE_ROUND
 
 HUE_NAMES = Palette.HUE_NAMES
 PLAYER_COLORS = Palette.PLAYER_COLORS
@@ -201,6 +210,7 @@ class GameEngine:
         self._last_turn_player: str | None = None
         self._prev_strokes: dict[str, int] = {}
         self._ball_was_moving: dict[str, bool] = {}
+        self._last_stroke_t: dict[str, float] = {}
         self._shot_armed = False
         self._tee_seen_since = 0.0
         self._tee_click: tuple[float, float, float] | None = None
@@ -359,7 +369,8 @@ class GameEngine:
                 if self.mapper is not None:
                     self.tracker.update(self._frame_color, None, self.mapper,
                                         self.cam, self.plane, self._confirmed_obstacles(), now,
-                                        play_area=self.setup.play_area)
+                                        play_area=self.setup.play_area,
+                                        reference_color=self.reference_color)
                     self._apply_ball_motion(now)
             return
         if self.state == S.CAL_BALLS:
@@ -535,8 +546,9 @@ class GameEngine:
     def _handle_action(self, action: str, msg: dict) -> None:
         st = self.state
         if action == "back":
-            # Esc during play pauses (per INPUT.md: "Pause | Esc").
-            if st in IN_GAME_STATES:
+            # Esc during a live hole pauses (INPUT.md). Game night Back
+            # returns to ball assignment instead of opening pause.
+            if st in PAUSE_ON_BACK:
                 self._enter_pause()
             elif st == S.PAUSE and (self._recal_flyout or self._pause_focus == 3):
                 self._pause_set_focus(0)
@@ -544,8 +556,11 @@ class GameEngine:
                 self._on_back()
             return
         if action == "menu":
-            if st in IN_GAME_STATES:
+            if st in PLAYABLE_ROUND:
                 self._enter_pause()
+            return
+        if action == "settings":
+            self._open_settings()
             return
         if st == S.BOOT:
             self._boot_action(action)
@@ -641,8 +656,10 @@ class GameEngine:
             self._set_state(S.CAL_CUP)
         elif st == S.GAME_START:
             self._set_state(S.CAL_BALLS)
+        elif st == S.HOLE_COMPLETE:
+            self._enter_pause()
         elif st == S.PAUSE:
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
         elif st == S.FIX_SCORE:
             self._set_state(S.PAUSE)
         elif st == S.SENSOR_CHECK:
@@ -650,10 +667,22 @@ class GameEngine:
         elif st in (S.SETTINGS, S.CREDITS, S.CHANGELOG):
             self._set_state(S.SETTINGS if st in (S.CREDITS, S.CHANGELOG) else self._settings_return)
 
+    def _open_settings(self) -> None:
+        """Open Settings from anywhere. Back returns to the screen you left."""
+        if self.state == S.SETTINGS:
+            return
+        if self.state in (S.CREDITS, S.CHANGELOG):
+            self._set_state(S.SETTINGS)
+            return
+        self._settings_return = self.state
+        self._set_state(S.SETTINGS)
+
     # ===================================================================== #
     # Per-screen actions
     # ===================================================================== #
     def _boot_action(self, action: str) -> None:
+        if action == "confirm":
+            action = "new_game"
         if action == "new_game":
             self._course_return = None
             self._set_state(S.SENSOR_CHECK)
@@ -670,11 +699,13 @@ class GameEngine:
             self._course_return = S.BOOT
             self._set_state(S.CAL_COURSE)
         elif action == "settings":
-            self._settings_return = S.BOOT
-            self._set_state(S.SETTINGS)
+            self._open_settings()
 
     def _sensor_action(self, action: str) -> None:
+        opening = self.backend is None and self.sensor_status == "opening"
         if action == "load":
+            if opening:
+                return
             saved = Setup.load()
             if saved is not None:
                 self.setup = saved
@@ -682,9 +713,13 @@ class GameEngine:
                 self._verify_return = S.SENSOR_CHECK
                 self._set_state(S.VERIFY)
         elif action == "fresh" or action == "new_game":
+            if self.backend is None:
+                return
             self.setup = Setup()
             self._set_state(S.CAL_FLOOR)
         elif action == "retry":
+            if opening:
+                return
             self.rescan_cameras()
             self._reconfigure_camera()
 
@@ -697,6 +732,9 @@ class GameEngine:
         elif action == "recalibrate":
             # Full wizard from Verify — do not jump back after the first step.
             self._recal_single = False
+            if self._round_in_progress() and not self._recal_return:
+                self._remember_round_resume()
+                self._recal_return = self._resume_after_recal()
             self._set_state(S.CAL_FLOOR)
 
     def _floor_action(self, action: str) -> None:
@@ -835,7 +873,10 @@ class GameEngine:
                     self.current_course_id = courses[idx]["id"]
                     self.layout = CourseLayout(courses[idx], self.setup.play_area)
             if self.layout is not None:
-                if self._course_return == S.BOOT and (self.mapper is None or not self.setup.play_area):
+                if self._recal_return and self._recal_single:
+                    self._refresh_layout_after_area()
+                    self._finish_recal()
+                elif self._course_return == S.BOOT and (self.mapper is None or not self.setup.play_area):
                     self._course_return = None
                     self._set_state(S.SENSOR_CHECK)
                 else:
@@ -1400,7 +1441,9 @@ class GameEngine:
             self._renumber_setup_players()
             self._derive_players_from_balls()
             self._lock_capture()
-            if self._recal_return:
+            if self._recal_return or self._round_in_progress():
+                if not self._recal_return:
+                    self._recal_return = self._resume_after_recal()
                 self._finish_recal()
             else:
                 self._set_state(S.GAME_START)
@@ -1526,15 +1569,40 @@ class GameEngine:
         if ptype != "down" or self.mapper is None:
             return
         floor = self._feed_to_floor(nx, ny)
-        if floor is None:
-            return
         if self._frame_color is None:
             return
         h, w = self._frame_color.shape[:2]
         ix = int(np.clip(nx * w, 0, w - 1))
         iy = int(np.clip(ny * h, 0, h - 1))
+        # Clicking an already-added marker selects that player.
+        if floor is not None:
+            best_i, best_d = None, 0.12
+            for i, p in enumerate(self.players):
+                bid = self.ball_for_player.get(p.id, f"ball{i}")
+                pos = self._ball_positions.get(bid)
+                if pos is None:
+                    continue
+                d = float(np.hypot(floor[0] - pos[0], floor[1] - pos[1]))
+                if d < best_d:
+                    best_d, best_i = d, i
+            if best_i is not None:
+                self._selected_setup_player = best_i
+                return
+        cup = None
+        if self.setup.hole is not None:
+            cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r)
+        dets = detect_setup_balls(
+            self._frame_color, self.reference_color, self.mapper,
+            self.setup.play_area, cup, loose=True,
+        )
+        hit = nearest_setup_ball(dets, self.mapper, float(ix), float(iy), max_px=64.0)
+        if hit is not None:
+            self._offer_setup_ball(hit, manual=True)
+            return
         swatch = sample_ball_at_pixel(self._frame_color, float(ix), float(iy))
         if swatch is None:
+            return
+        if floor is None:
             return
         swatch["pos"] = floor
         self._offer_setup_ball(swatch, manual=True)
@@ -1552,24 +1620,63 @@ class GameEngine:
         elif action == "secondary":
             self._start_recal("balls")
 
+    def _round_in_progress(self) -> bool:
+        """True once Game night has started (scores exist). Setup confirm
+        must not jump to the tee-off screen mid-round."""
+        return bool(self.player_scores)
+
+    def _remember_round_resume(self) -> None:
+        if self.state in PLAYABLE_ROUND:
+            self._prev_state_for_pause = self.state
+
+    def _resume_after_recal(self) -> str:
+        raw = self._recal_return or self._prev_state_for_pause
+        dest = RESUME_FROM_RECAL.get(raw, raw)
+        if dest in PLAYABLE_ROUND:
+            return dest
+        if self._round_in_progress():
+            return S.PLAY
+        return S.PAUSE
+
+    def _end_round(self) -> None:
+        self.player_scores = {}
+        self.finished_hole = {}
+        self.hole = 1
+        self.active_index = 0
+        self._recal_return = None
+        self._recal_single = False
+        self._recal_flyout = False
+        self._prev_state_for_pause = S.BOOT
+        self._settings_return = S.BOOT
+        self._transition_next = None
+        self._shot_armed = False
+
     def _enter_pause(self) -> None:
         if self.state == S.PAUSE:
             return
-        self._prev_state_for_pause = self.state
+        self._remember_round_resume()
         self._pause_focus = 0
         self._recal_flyout = False
         self._set_state(S.PAUSE)
 
+    def _pause_resume_dest(self) -> str:
+        dest = RESUME_FROM_RECAL.get(self._prev_state_for_pause, self._prev_state_for_pause)
+        if dest in PLAYABLE_ROUND:
+            return dest
+        if self._round_in_progress():
+            return S.PLAY
+        return S.BOOT
+
     def _pause_action(self, action: str, msg: dict) -> None:
-        rows = ["resume", "undo", "fix", "recalibrate", "course", "music", "quit"]
+        rows = ["resume", "undo", "fix", "recalibrate", "course", "settings", "quit"]
         if action == "resume":
             self._recal_flyout = False
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
         elif action == "back":
             if self._recal_flyout or self._pause_focus == 3:
                 self._pause_set_focus(0)
                 return
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
         elif action == "down":
             self._pause_set_focus((self._pause_focus + 1) % len(rows))
         elif action == "up":
@@ -1589,32 +1696,32 @@ class GameEngine:
             self._pause_activate(row)
         elif action == "recalibrate":
             self._pause_set_focus(3)
-        elif action in ("fix", "course", "music", "quit"):
+        elif action in ("fix", "course", "music", "settings", "quit"):
             self._pause_activate(action)
         elif action and action.startswith("recal_"):
             self._start_recal(action[6:])
         elif action == "undo":
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
             self._undo_last_shot()
 
     def _pause_activate(self, row: str) -> None:
         if row == "resume":
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
         elif row == "undo":
-            self._set_state(self._prev_state_for_pause)
+            self._set_state(self._pause_resume_dest())
             self._undo_last_shot()
         elif row == "fix":
             self._set_state(S.FIX_SCORE)
         elif row == "recalibrate":
             self._recal_flyout = True
         elif row == "course":
-            self._recal_return = S.PAUSE
+            self._recal_return = self._resume_after_recal()
             self._recal_single = True
             self._set_state(S.CAL_COURSE)
-        elif row == "music":
-            self._settings_return = S.PAUSE
-            self._set_state(S.SETTINGS)
+        elif row in ("music", "settings"):
+            self._open_settings()
         elif row == "quit":
+            self._end_round()
             self._set_state(S.BOOT)
 
     def _pause_set_focus(self, index: int) -> None:
@@ -1626,7 +1733,9 @@ class GameEngine:
         targets = {"cup", "balls", "area", "obstacles", "floor", "verify"}
         if kind not in targets:
             return
-        self._recal_return = S.PAUSE
+        self._remember_round_resume()
+        self._recal_return = None
+        self._recal_return = self._resume_after_recal()
         self._recal_single = kind != "floor"
         self._recal_flyout = False
         if kind == "cup":
@@ -1642,18 +1751,21 @@ class GameEngine:
         elif kind == "floor":
             self._set_state(S.CAL_FLOOR)
         else:
-            self._verify_return = S.PAUSE
+            self._verify_return = self._recal_return
             self._set_state(S.VERIFY)
 
     def _finish_recal(self) -> None:
-        dest = self._recal_return or S.PAUSE
+        dest = self._resume_after_recal()
+        if dest in CAL_STATES or dest in (S.BOOT, S.SENSOR_CHECK, S.SETTINGS):
+            dest = S.PLAY if self._round_in_progress() else S.PAUSE
         self._recal_return = None
         self._recal_single = False
         self._recal_flyout = False
-        self._pause_focus = 3
+        self._pause_focus = 0
         self._refresh_layout_after_area()
         self._save_setup()
         self._seed_tracker_from_positions()
+        self._sync_shot_arm()
         self._set_state(dest)
 
     def _seed_area_from_setup(self, force: bool = False) -> None:
@@ -1748,6 +1860,7 @@ class GameEngine:
             self._course_return = None
             self._set_state(S.SENSOR_CHECK)
         elif action == "start":
+            self._end_round()
             self._set_state(S.BOOT)
 
     # ===================================================================== #
@@ -1769,9 +1882,9 @@ class GameEngine:
             self._pointer_balls(ptype, nx, ny)
         elif st == S.CAL_OBSTACLES:
             self._pointer_obstacles(ptype, nx, ny, msg.get("handle"), bool(msg.get("shift")))
-        elif st == S.PLAY and ptype == "down":
-            self._pointer_place_tee(nx, ny)
-            if self.is_mock and self._shot_armed:
+        elif st in (S.PLAY, S.OOB, S.TURN_CHANGE, S.HOLE_OUT) and ptype == "down":
+            self._pointer_play_click(nx, ny)
+            if st == S.PLAY and self.is_mock and self._shot_armed:
                 self._pointer_putt(nx, ny)
 
     def _ensure_mapper(self) -> bool:
@@ -2059,6 +2172,86 @@ class GameEngine:
             return
         self._tee_click = (float(nx), float(ny), time.time() + 1.6)
         self._place_tee_at(bid, (float(floor[0]), float(floor[1])), arm=not self._shot_armed)
+
+    def _retrack_ball(self, bid: str, pos: tuple[float, float]) -> None:
+        self._ball_positions[bid] = (float(pos[0]), float(pos[1]))
+        self.tracker.seed_position(bid, (float(pos[0]), float(pos[1])), hold=False)
+        self._lost_since.pop(bid, None)
+
+    def _pointer_play_click(self, nx: float, ny: float) -> None:
+        """Click the camera to (re)track a ball. Never opens pause."""
+        self._ensure_mapper()
+        floor = self._feed_to_floor(nx, ny)
+        best_pid, best_d = None, 0.2
+        if floor is not None:
+            for p in self.players:
+                bid = self.ball_for_player.get(p.id)
+                pos = None
+                if bid:
+                    tb = self.tracker.balls.get(bid)
+                    if tb is not None and getattr(tb, "smoothed", None) is not None:
+                        pos = tb.smoothed
+                    else:
+                        pos = self._ball_positions.get(bid)
+                if pos is None:
+                    continue
+                d = float(np.hypot(floor[0] - pos[0], floor[1] - pos[1]))
+                if d < best_d:
+                    best_d, best_pid = d, p.id
+        if best_pid is not None and floor is not None:
+            bid = self.ball_for_player.get(best_pid)
+            if bid:
+                self._retrack_ball(bid, floor)
+                active = self._active_player()
+                if active is not None and active.id == best_pid and not self._shot_armed:
+                    self._place_tee_at(bid, floor, arm=False)
+            return
+        if self._frame_color is not None and self.mapper is not None:
+            h, w = self._frame_color.shape[:2]
+            ix = int(np.clip(nx * w, 0, w - 1))
+            iy = int(np.clip(ny * h, 0, h - 1))
+            cup = None
+            if self.setup.hole is not None:
+                cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r)
+            dets = detect_setup_balls(
+                self._frame_color, self.reference_color, self.mapper,
+                self.setup.play_area, cup, loose=True,
+            )
+            hit = nearest_setup_ball(dets, self.mapper, float(ix), float(iy), max_px=72.0)
+            if hit is not None:
+                self._retrack_from_detection(hit, floor)
+                return
+        self._pointer_place_tee(nx, ny)
+
+    def _retrack_from_detection(self, det: dict, floor: tuple[float, float] | None) -> None:
+        pos = det.get("pos") or floor
+        if pos is None:
+            return
+        hue = det.get("hue_name")
+        target = None
+        if hue:
+            target = next((p for p in self.players if p.hue_name == hue), None)
+        if target is None:
+            lost = self._lost_ball_snapshot()
+            if len(lost) == 1:
+                target = next((p for p in self.players if p.id == lost[0]["id"]), None)
+        if target is None:
+            target = self._active_player()
+        if target is None:
+            return
+        bid = self.ball_for_player.get(target.id)
+        if not bid:
+            return
+        if det.get("color"):
+            target.color = det["color"]
+        if hue:
+            target.hue_name = hue
+        if det.get("hue_range"):
+            target.hue_range = tuple(det["hue_range"])
+        self._retrack_ball(bid, (float(pos[0]), float(pos[1])))
+        active = self._active_player()
+        if active is not None and active.id == target.id and not self._shot_armed:
+            self._place_tee_at(bid, (float(pos[0]), float(pos[1])), arm=False)
 
     def _pointer_putt(self, nx: float, ny: float) -> None:
         if self._putt is not None:
@@ -2365,6 +2558,7 @@ class GameEngine:
         self._rebuilding = self.hole > 1
         self._putt = None
         self._ball_was_moving = {}
+        self._last_stroke_t = {}
         s = self.layout.start
         self.setup.start = CircleZone(s["x"], s["y"], s.get("r", 0.15))
         # Mock: move the physical cup to the new course's hole.
@@ -2437,12 +2631,15 @@ class GameEngine:
             self._ball_was_moving[ball_id] = False
             return
         was_moving = self._ball_was_moving.get(ball_id, False)
-        # Stroke on stopped -> moving.
+        # Stroke on stopped -> moving. Ignore a restart that is still the same putt.
         if tb.moving and not was_moving:
-            self._record_stroke(p.id)
+            last = self._last_stroke_t.get(ball_id, 0.0)
+            if now - last >= 0.60:
+                self._record_stroke(p.id)
+                self._last_stroke_t[ball_id] = now
         self._ball_was_moving[ball_id] = tb.moving
-        # Resolve when the ball stops.
-        if not tb.moving and was_moving:
+        # A coasted prediction is not a real rest — only a detection at rest ends the stroke.
+        if not tb.moving and was_moving and not getattr(tb, "coasting", False):
             self._resolve_after_stop(p, tb, now)
 
     def _track_in_bounds(self, ball_id: str, pos: tuple[float, float]) -> None:
@@ -2502,6 +2699,7 @@ class GameEngine:
         bid = self._active_ball_id()
         if bid:
             self._ball_was_moving[bid] = False
+            self._last_stroke_t[bid] = 0.0
 
     def _current_strokes(self, pid: str) -> int:
         sc = self.player_scores.get(pid, [])
@@ -2631,6 +2829,13 @@ class GameEngine:
             ui = self._ui_snapshot()
         except Exception:
             ui = {}
+        try:
+            sensor = (
+                self.backend.description.as_dict() if self.backend is not None
+                else self.sensor_desc
+            )
+        except Exception:
+            sensor = self.sensor_desc
         return {
             "screen": (
                 "S07c" if self.state == S.CAL_OBSTACLES and self._selected_obstacle is not None
@@ -2639,19 +2844,23 @@ class GameEngine:
             "state": self.state,
             "version": __version__,
             "input_mode": "keyboard",
-            "sensor": (
-                self.backend.description.as_dict() if self.backend is not None
-                else self.sensor_desc
-            ),
+            "sensor": sensor,
             "sensor_status": self.sensor_status,
             "settings": self.settings.data,
             "feed": {"enabled": self.settings.get("display", "showCameraFeed", default=True),
                      "w": self._feed_w, "h": self._feed_h},
-            "setup": self._setup_snapshot(),
-            "game": self._game_snapshot(),
-            "overlay": self._overlay_snapshot(),
+            "setup": self._safe_part(self._setup_snapshot, {}),
+            "game": self._safe_part(self._game_snapshot, {}),
+            "overlay": self._safe_part(self._overlay_snapshot, {"shapes": []}),
             "ui": ui,
         }
+
+    @staticmethod
+    def _safe_part(fn, fallback):
+        try:
+            return fn()
+        except Exception:
+            return fallback
 
     def _setup_snapshot(self) -> dict:
         return {
@@ -2707,7 +2916,9 @@ class GameEngine:
                     "saved_meta": meta, "saved_when": when}
         if st == S.SENSOR_CHECK:
             meta, when = self._saved_setup_meta()
-            return {"sensor": self.sensor_desc, "saved_meta": meta, "saved_when": when}
+            return {"sensor": self.sensor_desc, "saved_meta": meta, "saved_when": when,
+                    "opening": self.backend is None and self.sensor_status == "opening",
+                    "camera_error": self._camera_error}
         if st == S.VERIFY:
             return {}
         if st == S.CAL_FLOOR:
@@ -2722,7 +2933,8 @@ class GameEngine:
         if st == S.CAL_COURSE:
             aw, ah = self._play_area_size()
             return {"courses": self._courses_snapshot(), "step": 3,
-                    "area_w": aw, "area_h": ah}
+                    "area_w": aw, "area_h": ah,
+                    "recalibrating": bool(self._recal_return)}
         if st in (S.CAL_PLACE, S.HOLE_START):
             return {"step": 3, "ghosts": self._ghosts_snapshot(),
                     "course": course_by_id(self.current_course_id),
@@ -2756,6 +2968,7 @@ class GameEngine:
                 "color_only": self.is_color_only,
                 "selected": self._selected_setup_player,
                 "hue_clash": warn,
+                "recalibrating": bool(self._recal_return),
             }
         if st == S.GAME_START:
             return {"players": [p.as_dict() for p in self.players], "holes": self.holes, "stroke_cap": self.stroke_cap}
@@ -2844,6 +3057,20 @@ class GameEngine:
             cr = self.backend.description.color_res
             if cr:
                 actual = f"{cr[0]}x{cr[1]}"
+        exp = float(cfg.get("exposure", -6))
+        try:
+            from .sensor.webcam import exposure_shutter
+            denom, cap_fps = exposure_shutter(exp)
+        except Exception:
+            denom, cap_fps = 64, 64.0
+        fps_notice = ""
+        if fps is not None and float(fps) < 20:
+            fps_notice = (
+                f"Live rate is {float(fps):.0f} fps. Exposure {exp:g} is ~1/{denom} s "
+                f"(shutter cannot exceed ~{cap_fps:.0f} fps). Use −6 or −8 and turn "
+                f"the lights up for a rolling ball at 25 fps — lengthening the "
+                f"shutter to −4 brightens the picture but caps the camera."
+            )
         return {
             "devices": self._camera_list,
             "scanning": not self._camera_scan_done,
@@ -2853,9 +3080,12 @@ class GameEngine:
             "backend": str(cfg.get("backend", "auto")),
             "capture_api": status.get("capture_api") or "",
             "fourcc": status.get("fourcc") or "",
-            "exposure": float(cfg.get("exposure", -6)),
+            "exposure": exp,
+            "shutter_denom": denom,
+            "shutter_fps_cap": cap_fps,
             "measured_fps": None if fps is None else float(fps),
             "lock_notice": notice,
+            "fps_notice": fps_notice,
             "exposure_control": exposure_ok is not False,
             "show_driver_settings": bool(status.get("show_driver_settings")),
             "locked": bool(status.get("locked")),
@@ -3374,13 +3604,8 @@ class GameEngine:
                         "text": f"{ob.label} · drag a corner to resize",
                         "class": "overlay-outline-label",
                     })
-        # Balls + trail.
-        if st == S.CAL_BALLS and not self.players:
-            o["shapes"].append({
-                "type": "label", "x": 0.5, "y": 0.14,
-                "text": "Click each ball on the camera to add a player",
-                "fill": "#8be9c3", "size": 0.024, "anchor": "middle", "id": "ball_hint",
-            })
+        # Balls + trail. (S09 panel already has the click hint — don't paint
+        # another line on top of the title; it stole clicks and ate the words.)
         for i, p in enumerate(self.players):
             ball_id = self.ball_for_player.get(p.id, f"ball{i}")
             tb = self.tracker.balls.get(ball_id)

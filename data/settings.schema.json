@@ -124,7 +124,8 @@
             "resolution": { "type": "string" },
             "fourcc": { "type": "string" },
             "fps": { "type": "number" },
-            "ok": { "type": "boolean" }
+            "ok": { "type": "boolean" },
+            "exposure": { "type": "number" }
           }
         }
       }

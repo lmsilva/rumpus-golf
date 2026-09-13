@@ -16,6 +16,8 @@ window.RG = window.RG || {};
   let dragHandle = null;
   let dragX = 0;
   let dragY = 0;
+  let srcW = 16;
+  let srcH = 9;
 
   function ensure() {
     if (wrap) return;
@@ -32,10 +34,8 @@ window.RG = window.RG || {};
     if (wired) return;
     wired = true;
     const norm = (e) => {
-      const r = wrap.getBoundingClientRect();
-      const w = r.width || 1;
-      const h = r.height || 1;
-      return { x: (e.clientX - r.left) / w, y: (e.clientY - r.top) / h };
+      const box = wrap.getBoundingClientRect();
+      return wrapToImage(e.clientX - box.left, e.clientY - box.top);
     };
     const send = (type, e, handle) => {
       const p = norm(e);
@@ -56,16 +56,17 @@ window.RG = window.RG || {};
       send("move", e, dragHandle);
     };
     const handleAt = (e) => {
-      const r = wrap.getBoundingClientRect();
-      const px = e.clientX - r.left;
-      const py = e.clientY - r.top;
+      const box = wrap.getBoundingClientRect();
+      const dest = destFor(box.width, box.height, srcW, srcH);
+      const px = e.clientX - box.left;
+      const py = e.clientY - box.top;
       let best = null, bestD = HANDLE_PX;
       for (const s of lastShapes) {
         const id = s.id || "";
         if (s.type !== "circle") continue;
         const parsed = parseHandleId(id);
         if (parsed == null) continue;
-        const d = Math.hypot(px - s.x * r.width, py - s.y * r.height);
+        const d = Math.hypot(px - (dest.x + s.x * dest.w), py - (dest.y + s.y * dest.h));
         if (d <= bestD) {
           bestD = d;
           best = parsed;
@@ -172,6 +173,39 @@ window.RG = window.RG || {};
     wrap.classList.toggle("interactive", interactive);
   }
 
+  function destFor(cw, ch, iw, ih) {
+    iw = Math.max(1, iw);
+    ih = Math.max(1, ih);
+    const scale = Math.min(cw / iw, ch / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    return { x: (cw - dw) / 2, y: (ch - dh) / 2, w: dw, h: dh };
+  }
+
+  function placeLayers(r) {
+    const apply = (el) => {
+      if (!el) return;
+      el.style.left = r.x + "px";
+      el.style.top = r.y + "px";
+      el.style.width = r.w + "px";
+      el.style.height = r.h + "px";
+      el.style.right = "auto";
+      el.style.bottom = "auto";
+    };
+    apply(svg);
+    apply(htmlLayer);
+  }
+
+  function wrapToImage(px, py) {
+    const cw = wrap.clientWidth || 1;
+    const ch = wrap.clientHeight || 1;
+    const r = destFor(cw, ch, srcW, srcH);
+    return {
+      x: Math.min(1, Math.max(0, r.w > 0 ? (px - r.x) / r.w : 0)),
+      y: Math.min(1, Math.max(0, r.h > 0 ? (py - r.y) / r.h : 0)),
+    };
+  }
+
   function size() {
     if (!wrap || !wrap.isConnected) return;
     const w = Math.max(1, wrap.clientWidth);
@@ -182,6 +216,7 @@ window.RG = window.RG || {};
     }
     svg.setAttribute("viewBox", "0 0 1 1");
     svg.setAttribute("preserveAspectRatio", "none");
+    placeLayers(destFor(w, h, srcW, srcH));
   }
 
   RG.feed = {
@@ -207,7 +242,12 @@ window.RG = window.RG || {};
         createImageBitmap(blob)
           .then((bmp) => {
             if (gen !== drawGen || !wrap.isConnected || wrap.classList.contains("hidden")) { bmp.close(); return; }
-            ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+            srcW = bmp.width;
+            srcH = bmp.height;
+            const r = destFor(canvas.width, canvas.height, srcW, srcH);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(bmp, r.x, r.y, r.w, r.h);
+            placeLayers(r);
             bmp.close();
           })
           .catch(() => {});
@@ -216,7 +256,12 @@ window.RG = window.RG || {};
         const url = URL.createObjectURL(blob);
         img.onload = () => {
           if (gen === drawGen && wrap.isConnected && !wrap.classList.contains("hidden")) {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            srcW = img.naturalWidth;
+            srcH = img.naturalHeight;
+            const r = destFor(canvas.width, canvas.height, srcW, srcH);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, r.x, r.y, r.w, r.h);
+            placeLayers(r);
           }
           URL.revokeObjectURL(url);
         };

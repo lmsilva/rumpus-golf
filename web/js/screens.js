@@ -7,6 +7,9 @@ function esc(s) {
 function dot(color, size = 16) {
   return `<span class="dot" style="width:${size}px;height:${size}px;background:${color}"></span>`;
 }
+function settingsBtn() {
+  return `<button type="button" class="hint back-btn" data-action="settings">${RG.glyph("settings")}<span>Settings</span></button>`;
+}
 function topbar(subtitle, opts = {}) {
   const right = [RG.badge()];
   if (opts.browse) {
@@ -14,6 +17,9 @@ function topbar(subtitle, opts = {}) {
   }
   if (opts.menu) {
     right.push(`<button type="button" class="hint back-btn" data-action="menu">${RG.glyph("menu")}<span>Pause</span></button>`);
+  }
+  if (opts.settings !== false) {
+    right.push(settingsBtn());
   }
   if (opts.back !== false) {
     right.push(`<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button>`);
@@ -83,6 +89,12 @@ S.S01 = function (st) {
     { label: "Course library", action: "library", cls: "secondary", verb: "confirm" },
     { label: "Settings", action: "settings", cls: "secondary", verb: "confirm" },
   ];
+  const sensorName = st.sensor && st.sensor.model;
+  const pill = sensorName
+    ? `${sensorName} connected`
+    : (st.sensor_status === "opening" || !st.sensor_status || st.sensor_status === "none"
+      ? "Looking for camera…"
+      : st.sensor_status);
   return `
   ${photo("s01", "saturate(.75) brightness(.8)", "linear-gradient(90deg,var(--ground) 0 780px,rgba(var(--ground-rgb),.85) 980px,rgba(var(--ground-rgb),.15) 1500px)", { right: 1040 })}
   <div style="position:absolute;inset:0;padding:72px 96px;display:flex;flex-direction:column">
@@ -99,37 +111,49 @@ S.S01 = function (st) {
     </div>
   </div>
   <div class="pill" style="position:absolute;right:56px;bottom:48px;padding:14px 20px;font:600 17px var(--font-body)">
-    <span class="dot" style="background:var(--mint);width:10px;height:10px"></span>${esc((st.sensor && st.sensor.model) || "Kinect v1")} connected
+    <span class="dot" style="background:${sensorName ? "var(--mint)" : "var(--text-muted)"};width:10px;height:10px"></span>${esc(pill)}
     <span class="text-muted">· Lobby Time — Kevin MacLeod</span>
   </div>`;
 };
 
 S.S02 = function (st) {
   const d = st.sensor || (st.ui && st.ui.sensor);
+  const color = (d && d.color_res) || [0, 0];
+  const depth = (d && d.depth_res) || [0, 0];
   const facts = d ? [
-    ["Depth", `${d.depth_res[0]} × ${d.depth_res[1]}`],
-    ["Color", `${d.color_res[0]} × ${d.color_res[1]}`],
+    ["Depth", `${depth[0] || 0} × ${depth[1] || 0}`],
+    ["Color", `${color[0] || 0} × ${color[1] || 0}`],
     ["Field of view", `${d.fov_h_deg}° horizontal`],
     ["Reliable range", `${d.reliable_min_m} – ${d.reliable_max_m} m`],
     ["Note", d.note || ""],
   ] : [];
-  const noSensor = !d;
+  const opening = !d && (st.sensor_status === "opening" || !!(st.ui && st.ui.opening));
+  const noSensor = !d && !opening;
   const expNotice = d && d.exposure_control === false
     ? `<div class="warn-banner" style="margin-top:28px">This camera controls its own exposure. Bright, even room light keeps tracking fast; dim rooms will slow it down.</div>`
     : "";
+  const waitCopy = `The webcam is still opening — this can take a minute. Stay here; the name appears when it answers.`;
+  const errCopy = (st.ui && st.ui.camera_error)
+    ? st.ui.camera_error
+    : "No camera found. Plug in a webcam or Kinect and press Retry. Close Zoom / Teams / Iriun if they have the device.";
   return `
   ${topbar("New game")}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:56px;height:calc(100% - 96px)">
     <div class="card" style="padding:56px 64px;display:flex;flex-direction:column">
       <div class="kicker mint">Sensor</div>
-      <h2 style="font-size:80px;letter-spacing:-.035em;margin:14px 0 36px">${noSensor ? "No camera" : esc(d.model)}<br>found.</h2>
-      ${noSensor ? "" : `<div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 var(--font-body)">
+      <h2 style="font-size:80px;letter-spacing:-.035em;margin:14px 0 36px">${opening ? "Looking for<br>camera…" : (noSensor ? "No camera<br>found." : `${esc(d.model)}<br>found.`)}</h2>
+      ${noSensor || opening ? "" : `<div style="display:grid;grid-template-columns:auto 1fr;gap:14px 40px;font:400 23px/1.3 var(--font-body)">
              ${facts.map(([k, v]) => `<span class="text-muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}
            </div>${expNotice}`}
+      ${opening ? `<div style="margin-top:auto;background:rgba(139,233,195,.10);border:1px solid rgba(139,233,195,.35);border-radius:18px;padding:24px 28px;display:flex;gap:18px">
+             <span class="dot" style="width:12px;height:12px;background:var(--mint);margin-top:10px"></span>
+             <div><div style="font:700 22px var(--font-display)">Opening the camera</div>
+             <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:4px">${esc(waitCopy)}</div></div>
+           </div>` : ""}
       ${noSensor ? `<div style="margin-top:auto;background:rgba(255,107,87,.12);border:1px solid rgba(255,107,87,.4);border-radius:18px;padding:24px 28px;display:flex;gap:18px">
              <span class="dot" style="width:12px;height:12px;background:var(--coral);margin-top:10px"></span>
              <div><div style="font:700 22px var(--font-display)">Error state — no sensor</div>
-             <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:4px">No camera found. Plug in a Kinect v1 or v2 and press Retry. Nothing else is reachable until a sensor answers.</div>
+             <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:4px">${esc(errCopy)}</div>
              <button class="btn primary sm" style="margin-top:16px" data-action="retry"><span>Retry</span>${RG.btnHint("confirm")}</button></div>
            </div>` : ""}
     </div>
@@ -246,12 +270,13 @@ S.S05 = function (st) {
 S.S06 = function (st) {
   const courses = st.ui.courses || [];
   const cur = st.game && st.game.course_id;
+  const recal = !!(st.ui && st.ui.recalibrating);
   return `
   ${photo("s06", "saturate(.8)", "linear-gradient(180deg,rgba(var(--ground-rgb),.4) 0%,rgba(var(--ground-rgb),.92) 60%)", { opacity: 0.28 })}
-  ${topbar("Step 3 of 5 · Course", { browse: true })}
+  ${topbar(recal ? "Change course" : "Step 3 of 5 · Course", { browse: true })}
   <div style="position:relative;padding:40px 56px 48px;display:flex;flex-direction:column;gap:20px;height:calc(100% - 96px)">
-    <div><h2 style="font-size:60px">Pick a course for hole 1.</h2>
-    <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-top:8px">Drawn for your ${(st.ui && st.ui.area_w) || "3.0"} × ${(st.ui && st.ui.area_h) || "2.0"} m area. You’ll place the real objects next and can nudge anything.</div></div>
+    <div><h2 style="font-size:60px">${recal ? "Pick a course for this hole." : "Pick a course for hole 1."}</h2>
+    <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-top:8px">${recal ? "Choosing a course returns you to the game. Back cancels." : `Drawn for your ${(st.ui && st.ui.area_w) || "3.0"} × ${(st.ui && st.ui.area_h) || "2.0"} m area. You’ll place the real objects next and can nudge anything.`}</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;flex:1">
       ${courses.map((c, i) => {
         const sel = c.id === cur;
@@ -265,7 +290,7 @@ S.S06 = function (st) {
           <div style="font:400 18px/1.4 var(--font-body);opacity:.8">${esc(c.blurb)}</div>
           <div class="kicker" style="margin-top:14px">You will need</div>
           <div style="font:400 17px/1.4 var(--font-body);margin-top:6px">${c.needs.map(esc).join(" · ")}</div>
-          <div class="row" style="margin-top:16px"><button type="button" class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${sel ? "Selected" : "Choose"}</span>${RG.btnHint("confirm")}</button></div>
+          <div class="row" style="margin-top:16px"><button type="button" class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${recal ? (sel ? "Use this course" : "Choose") : (sel ? "Selected" : "Choose")}</span>${RG.btnHint("confirm")}</button></div>
         </div>`;
       }).join("")}
     </div>
@@ -324,7 +349,14 @@ S["S07b"] = function (st) {
   const obs = st.ui.obstacles || [];
   const flagged = obs.filter((o) => o.state === "proposed" && o.confidence < 0.7);
   return `
-  <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:520px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
+  ${topbar("", { rail: stepRail(3) })}
+  <div class="feed-split">
+    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
+      ${livePill(st, true)}
+      <div class="pill" style="position:absolute;left:16px;top:16px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Scanned 1.5 s of depth · dashed = proposed</div>
+      <div class="hints">${RG.hint("stick", "Move cursor")}${RG.hint("confirm", "Select object")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Draw one")}${RG.hint("prev", "Undo")}</div>
+    </div>
+    <div class="card" style="padding:36px;display:flex;flex-direction:column">
     <div class="kicker mint">Step 3 of 5 · Obstacles</div>
     <h2 style="font-size:48px;margin:8px 0 10px">Found ${obs.length} objects.</h2>
     <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Outlines are approximate on purpose — they only draw the map and keep hidden balls from counting as lost. Delete anything that isn’t an object, then confirm.</div>
@@ -343,10 +375,8 @@ S["S07b"] = function (st) {
       </div>
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Low-confidence outlines must be confirmed or deleted before Confirm all.</div>
     </div>
-  </div>
-  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3;display:flex;align-items:center;gap:16px"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span><button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></div>
-  <div class="pill" style="position:absolute;left:56px;top:150px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Scanned 1.5 s of depth · dashed = proposed, not yet on the course</div>
-  <div class="hints">${RG.hint("stick", "Move cursor")}${RG.hint("confirm", "Select object")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Draw one")}${RG.hint("prev", "Undo")}</div>`;
+    </div>
+  </div>`;
 };
 
 S["S07c"] = function (st) {
@@ -357,15 +387,20 @@ S["S07c"] = function (st) {
   const statusLabel = { proposed: "Pending", confirmed: "Confirmed", selected: "Selected", deleted: "Deleted", drawing: "Drawing" };
   const selected = sel != null ? obs[sel] : null;
   return `
-  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3;display:flex;align-items:center;gap:16px"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span><button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></div>
-  <div class="legend">
-    <span class="pill">${`<span class="swatch" style="background:var(--mint)"></span>`} Selected</span>
-    <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
-    <span class="pill">${`<span class="swatch" style="background:rgba(242,239,232,.3)"></span>`} Pending</span>
-    <span class="pill">${`<span class="swatch" style="background:var(--coral);opacity:.35"></span>`} Deleted</span>
-    <span class="pill">${`<span class="swatch" style="background:#f2efe8;border-top:1px dashed #f2efe8;height:0;opacity:.8"></span>`} Drawing</span>
-  </div>
-  <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:520px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
+  ${topbar("", { rail: stepRail(3) })}
+  <div class="feed-split">
+    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
+      ${livePill(st, true)}
+      <div class="legend" style="position:absolute;left:16px;top:16px;z-index:3">
+        <span class="pill">${`<span class="swatch" style="background:var(--mint)"></span>`} Selected</span>
+        <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
+        <span class="pill">${`<span class="swatch" style="background:rgba(242,239,232,.3)"></span>`} Pending</span>
+        <span class="pill">${`<span class="swatch" style="background:var(--coral);opacity:.35"></span>`} Deleted</span>
+        <span class="pill">${`<span class="swatch" style="background:#f2efe8;border-top:1px dashed #f2efe8;height:0;opacity:.8"></span>`} Drawing</span>
+      </div>
+      <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add / remove corner")}${RG.hint("prev", `Undo · ${(st.ui && st.ui.undo_count) || 0}`)}</div>
+    </div>
+    <div class="card" style="padding:36px;display:flex;flex-direction:column">
     <div class="kicker mint">Object ${(sel != null ? sel + 1 : 1)} · ${selected ? esc(selected.label || "") : ""}</div>
     <h2 style="font-size:48px;margin:8px 0 10px">Fix the outline.</h2>
     <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Drag the corners until the outline roughly covers the object. Close enough is good enough. Click an edge to add a corner; press stick to remove one.</div>
@@ -385,8 +420,8 @@ S["S07c"] = function (st) {
       <button class="btn secondary stretch quiet" data-action="confirm" ${pending.length ? "disabled" : ""}><span>Course is set</span><span class="meta">${pending.length} pending${drawing ? ` · ${drawing} drawing` : ""}</span></button>
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Undo steps back through every edit in this step, including re-detects.</div>
     </div>
-  </div>
-  <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add / remove corner")}${RG.hint("prev", `Undo · ${(st.ui && st.ui.undo_count) || 0}`)}</div>`;
+    </div>
+  </div>`;
 };
 
 S.S08 = function (st) {
@@ -412,10 +447,17 @@ S.S09 = function (st) {
   const players = st.ui.players || [];
   const rejected = st.ui.rejected || 0;
   const sel = st.ui.selected;
+  const recal = !!(st.ui && st.ui.recalibrating);
   return `
-  ${topbar("", { rail: stepRail(5) })}
-  <div style="position:absolute;left:56px;top:120px;z-index:3"><h2 style="font:800 48px var(--font-display)">Put every ball on the floor.</h2></div>
-  <div class="glass-strong" style="position:absolute;right:40px;top:120px;bottom:56px;width:640px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
+  ${topbar(recal ? "Re-assign balls" : "", { rail: recal ? "" : stepRail(5) })}
+  <div class="feed-split">
+    <div class="col" style="min-height:0;gap:16px">
+      <h2 style="font:800 40px/1.1 var(--font-display);flex:none">${recal ? "Click each ball so I can see it again." : "Put every ball on the floor."}</h2>
+      <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px;flex:1;min-height:0">
+        ${livePill(st, true)}
+      </div>
+    </div>
+    <div class="card" style="padding:36px;display:flex;flex-direction:column">
     <div class="kicker">${balls.length} ball${balls.length === 1 ? "" : "s"} found · ${rejected} rejected</div>
     <h2 style="font-size:48px;margin:8px 0 10px">Who’s who?</h2>
     <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">One player per color. Numbers on the course match this tee-off list. Click a row to point at that ball. Remove a row if auto-detect was wrong.</div>
@@ -436,8 +478,9 @@ S.S09 = function (st) {
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
       ${roomNameField(st, "Save as")}
-      <button class="btn primary stretch" data-action="confirm"${players.length ? "" : " disabled"}><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
-      <div style="font:400 14px var(--font-body);color:var(--text-muted)">Writes rumpus-setup.json: floor plane, play area, course template, hole zone, ball hues, names.</div>
+      <button class="btn primary stretch" data-action="confirm"${players.length ? "" : " disabled"}><span>${recal ? "Return to game" : "Save setup & continue"}</span>${RG.btnHint("confirm")}</button>
+      <div style="font:400 14px var(--font-body);color:var(--text-muted)">${recal ? "Keeps the current hole and scores. Back also returns to the game." : "Writes rumpus-setup.json: floor plane, play area, course template, hole zone, ball hues, names."}</div>
+    </div>
     </div>
   </div>`;
 };
@@ -448,7 +491,8 @@ S.S10 = function (st) {
   const cap = st.ui.stroke_cap;
   return `
   ${photo("s10", "saturate(.75) brightness(.8)", "linear-gradient(90deg,rgba(var(--ground-rgb),.95) 0%,rgba(var(--ground-rgb),.35) 48%,rgba(var(--ground-rgb),.6) 100%)", { opacity: 0.3 })}
-  <div style="position:relative;display:grid;grid-template-columns:1fr 760px;gap:32px;padding:56px;height:100%">
+  ${topbar("Game night")}
+  <div style="position:relative;display:grid;grid-template-columns:1fr 760px;gap:32px;padding:32px 56px 48px;height:calc(100% - 96px)">
     <div class="col" style="gap:20px">
       ${roomNameField(st, "Setup saved")}
       <h2 style="font:800 112px/1 var(--font-display);letter-spacing:-.045em">Game<br>night.</h2>
@@ -509,18 +553,22 @@ S.S11 = function (st) {
           <div class="row" style="gap:8px">${dot(p.color, 16)}<div style="font:700 24px/1.25 var(--font-display);max-width:150px;overflow:hidden">${marquee(p.name)}</div></div>
           <div style="font:400 18px var(--font-body);color:var(--text-muted)">${finished[p.id] ? `Holed · ${(scores[p.id] || [])[st.game.hole - 1] || 0}` : `Stroke ${(scores[p.id] || [])[st.game.hole - 1] || 0} · in play`}</div>
         </div>`).join("")}
+        <div class="col" style="gap:8px;pointer-events:auto;justify-content:center">
+          ${RG.hint("settings", "Settings")}
+          ${RG.hint("undo", "Undo last shot")}
+          ${RG.hint("menu", "Pause")}
+        </div>
       </div>
     </div>
-    <div class="glass" style="position:absolute;left:0;bottom:0;border-radius:20px;padding:18px 24px;pointer-events:auto">
+    <div class="glass" style="position:absolute;left:0;bottom:0;border-radius:20px;padding:18px 24px;pointer-events:none">
       <div class="kicker">Hole ${st.game.hole} of ${st.game.holes} · ${esc(course.level || "")} · Par ${course.par || ""}</div>
       <div style="font:800 34px/1 var(--font-display)">${esc(course.name || "")}</div>
     </div>
-    <div class="row" style="position:absolute;right:0;bottom:0;gap:10px;pointer-events:auto">
+    <div class="row" style="position:absolute;right:0;bottom:0;gap:10px;${awaiting ? "pointer-events:auto" : "pointer-events:none"}">
       ${awaiting ? `<button class="btn primary sm" data-action="ready"><span>It’s in the start zone — let’s play</span>${RG.btnHint("confirm")}</button>` : ""}
-      ${RG.hint("undo", "Undo last shot")}${RG.hint("menu", "Pause")}
     </div>
     ${lostBallBar(ui.lost_balls, 0)}
-    <div class="pill" style="position:absolute;right:0;top:230px;pointer-events:auto">
+    <div class="pill" style="position:absolute;right:0;top:230px;pointer-events:none">
       ${dot(a ? a.color : "#fff", 10)}<span data-play-pill>${esc(playPill(ui, motion))}</span>
     </div>
   </div>`;
@@ -555,11 +603,11 @@ function lostBallBar(lost, inset) {
   const row = (lost || [])[0];
   if (!row) return "";
   const edge = inset == null ? 40 : inset;
-  return `<div class="lost-bar glass-strong" style="position:absolute;left:${edge}px;right:${edge}px;bottom:${edge}px;border-radius:24px;padding:22px 28px;z-index:6;display:flex;align-items:center;gap:16px;pointer-events:auto">
+  return `<div class="lost-bar glass-strong" style="position:absolute;left:${edge}px;right:${edge}px;bottom:${edge}px;border-radius:24px;padding:22px 28px;z-index:6;display:flex;align-items:center;gap:16px;pointer-events:none">
     ${dot(row.color, 20)}
     <div><div style="font:700 28px var(--font-display)">Lost ${esc(row.name)}’s ball.</div>
-    <div style="font:400 21px var(--font-body);color:var(--text-muted)">It left the camera. Re-assign if you swapped colors.</div></div>
-    <span style="margin-left:auto">${RG.hint("secondary", "Re-assign balls")}</span>
+    <div style="font:400 21px var(--font-body);color:var(--text-muted)">Click it on the camera to track it again. Re-assign only if colors swapped.</div></div>
+    <span style="margin-left:auto;pointer-events:auto">${RG.hint("secondary", "Re-assign balls")}</span>
   </div>`;
 }
 
@@ -635,7 +683,7 @@ S.S15 = function (st) {
     ["Fix score", "fix", "F", ""],
     ["Recalibrate…", "recalibrate", "R", ""],
     ["Change course for this hole", "course", "C", ""],
-    ["Music & sound", "music", "M", ""],
+    ["Settings", "settings", "S", ""],
     ["Quit to start", "quit", "Q", ""],
   ];
   const recal = [
@@ -761,6 +809,7 @@ S.S17 = function (st) {
         <button class="btn primary" data-action="confirm" style="min-width:440px"><span>${st.ui.is_last ? "See results" : `Build hole ${st.ui.next_hole}`}</span>${RG.btnHint("confirm")}</button>
         <button class="btn secondary" data-action="replay"><span>Replay this hole</span></button>
         <button class="btn secondary" data-action="fix"><span>Fix a score</span></button>
+        <button class="btn glass" data-action="back"><span>Back</span>${RG.btnHint("back")}</button>
       </div>
     </div>
     <div class="col" style="gap:20px">
@@ -898,16 +947,17 @@ S.S19 = function (st) {
     ? settingsCard("Players", "Saved names & colors", `<div class="col" style="gap:10px;margin-top:14px">${players.map((p) => `<div class="row" style="background:var(--fill-quiet);border-radius:14px;padding:12px 16px">${dot(p.color, 32)}<span style="font:700 24px var(--font-display)">${esc(p.name)}</span><span style="margin-left:auto;font:400 16px var(--font-body);color:var(--text-muted)">${esc(p.hue_name || "")}</span></div>`).join("")}</div>`)
     : settingsCard("Players", "No players yet", `<div style="font:400 17px var(--font-body);color:var(--text-muted);margin-top:8px">Players are created during setup when you put colored balls on the floor (step 5).</div>`);
 
-  const measuredFps = cam.measured_fps != null ? cam.measured_fps : (sensor && sensor.fps);
   const apiNames = { dshow: "DirectShow", msmf: "Media Foundation" };
+  const expVal = cam.exposure != null ? cam.exposure : ((s.camera && s.camera.exposure) != null ? s.camera.exposure : -6);
+  const shutterN = cam.shutter_denom || (1 << Math.max(1, Math.round(-Number(expVal))));
+  const fourcc = cam.fourcc || (sensor && sensor.fourcc) || "";
   const facts = sensor ? [
     ["In use", sensor.model],
     ["Color", `${sensor.color_res[0]} × ${sensor.color_res[1]}`],
-    ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "— (color only)"],
-    ["FOURCC", cam.fourcc || sensor.fourcc || "—"],
+    ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "None — this webcam has no depth"],
+    ["FOURCC", (!fourcc || fourcc.indexOf("?") >= 0) ? "unknown (asked MJPG)" : fourcc],
     ["Capture", apiNames[cam.capture_api] || cam.capture_api || "—"],
-    ["Measured fps", measuredFps != null ? `${Number(measuredFps).toFixed(1)} fps` : "—"],
-    ["Exposure", cam.exposure_control === false ? "Camera-controlled" : "Programmable"],
+    ["Exposure", cam.exposure_control === false ? "Camera-controlled" : `Manual · ${expVal} (~1/${shutterN} s)`],
     ["Field of view", `${sensor.fov_h_deg}°`],
     ["Reliable range", `${sensor.reliable_min_m} – ${sensor.reliable_max_m} m`],
     ["Note", sensor.note || ""],
@@ -921,7 +971,7 @@ S.S19 = function (st) {
     : "";
   const err = cam.error ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.error)}</div>` : "";
   const lockNotice = cam.lock_notice ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.lock_notice)}</div>` : "";
-  const exp = cam.exposure != null ? cam.exposure : ((s.camera && s.camera.exposure) != null ? s.camera.exposure : -6);
+  const exp = expVal;
   const debugOn = !!(s.display && s.display.debugOverlay);
   const driverBtn = cam.show_driver_settings
     ? `<div style="margin-top:16px">
@@ -933,9 +983,9 @@ S.S19 = function (st) {
   if (cam.resolution && !resChoices.includes(cam.resolution)) resChoices.unshift(cam.resolution);
   const cameraTab = `
     ${mockWarn}${err}${lockNotice}
-    ${settingsCard("Live preview", "What this camera sees right now", `<div class="feed-slot" data-feed-slot style="margin-top:14px;aspect-ratio:16/9;border-radius:16px"></div>`)}
+    ${settingsCard("Live preview", "What this camera sees right now", `<div class="feed-slot" data-feed-slot style="margin-top:14px;aspect-ratio:16/9;border-radius:16px"><span class="pill live-pill" data-live-rate>LIVE</span></div>`)}
     ${settingsCard("Sensor", "What is actually attached right now", `<dl class="s-fact">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`)}
-    ${settingsCard("Exposure", "Shorter (more negative) keeps a rolling ball sharp. Default −6 is about 1/64 s.", `
+    ${settingsCard("Exposure", "−6 (~1/64 s) is the tracking default. −4 (~1/16 s) is brighter and higher contrast, but the shutter itself cannot do 25 fps — turn the room lights up instead of lengthening the exposure.", `
       <div class="s-inline" style="margin-top:14px">
         <span class="text-muted" style="width:120px">Exposure</span>
         <input class="slider grow" type="range" min="-8" max="-4" step="1" value="${exp}" data-set-camera-exposure ${cam.exposure_control === false ? "disabled" : ""}>
@@ -1007,11 +1057,12 @@ S.S19 = function (st) {
 S.S20 = function (st) {
   return `
   ${photo("s20", "saturate(.8) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.3) 0%,rgba(var(--ground-rgb),.85) 45%,rgba(var(--ground-rgb),.97) 100%)")}
-  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Credits</span><span class="right">${RG.badge()}<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></span></div>
+  ${topbar("Credits", { settings: false })}
   <div style="position:absolute;left:56px;bottom:56px;width:560px;z-index:2">
     <div class="kicker mint">Made with</div>
     <div style="font:800 88px/1 var(--font-display);letter-spacing:-.04em;text-shadow:0 2px 20px rgba(0,0,0,.5)">Books,<br>a cup and<br>a camera.</div>
-    <div style="font:400 18px/1.5 var(--font-body);color:var(--text-soft)">Rumpus Golf v${st.version} · Python 3.11 · OpenCV · libfreenect / libfreenect2. No machine learning, no cloud — just your living room.</div>
+    <div style="font:400 18px/1.5 var(--font-body);color:var(--text-soft);margin:16px 0 24px">Rumpus Golf v${st.version} · Python 3.11 · OpenCV · libfreenect / libfreenect2. No machine learning, no cloud — just your living room.</div>
+    <button class="btn glass" data-action="back"><span>Back to settings</span>${RG.btnHint("back")}</button>
   </div>
   <div style="position:absolute;left:760px;right:56px;top:120px;bottom:56px;display:grid;grid-template-columns:1fr 1fr;gap:16px;overflow:auto;z-index:2">
     ${creditGroup("Music", [['"Lobby Time" Kevin MacLeod (incompetech.com)', "CC BY 4.0"], ['"Backed Vibes Clean" Kevin MacLeod (incompetech.com)', "CC BY 4.0"]])}
@@ -1034,13 +1085,14 @@ S.S21 = function (st) {
   const rels = st.ui.changelog || [];
   return `
   ${photo("s21", "saturate(.7) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.97) 0%,rgba(var(--ground-rgb),.9) 55%,rgba(var(--ground-rgb),.3) 100%)")}
-  <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">What’s new</span><span class="right">${RG.badge()}<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></span></div>
+  ${topbar("What’s new", { settings: false })}
   <div style="position:absolute;left:56px;top:120px;width:420px;z-index:2">
     <div class="kicker mint">Current version</div>
     <div style="font:800 120px/1 var(--font-display);letter-spacing:-.05em">v${st.version}</div>
     <div style="font:400 18px/1.5 var(--font-body);color:var(--text-muted);margin-top:12px">
       <span style="color:var(--mint)">new</span> · <span>improved</span> · <span style="color:var(--coral)">fixed</span>
     </div>
+    <button class="btn glass" style="margin-top:28px" data-action="back"><span>Back to settings</span>${RG.btnHint("back")}</button>
   </div>
   <div class="col" style="position:absolute;left:540px;top:120px;bottom:56px;width:900px;overflow:auto;gap:14px;z-index:2">
     ${rels.map((r, i) => `<div class="glass" style="border-radius:20px;padding:24px 28px">

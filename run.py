@@ -15,6 +15,11 @@ LAN binds require the printed token URL so the camera feed is not open to the ne
 from __future__ import annotations
 
 import argparse
+import os
+
+# Before OpenCV loads via rumpus.server. MSMF HW transforms often open a
+# webcam then fail every grab with HRESULT -1072873821.
+os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 from rumpus.server import run
 

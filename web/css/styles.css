@@ -114,7 +114,7 @@ html, body {
 }
 html[data-fullscreen="1"] #scene { border-radius: 0; }
 
-/* ---- focus ring (keyboard navigation) ---- */
+/* ---- keyboard selection (fill, not just an outline) ---- */
 button:focus,
 [tabindex]:focus,
 input:focus,
@@ -122,19 +122,88 @@ select:focus,
 textarea:focus {
   outline: none;
 }
-button:focus-visible,
-[tabindex]:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-button.kb-focus,
-[tabindex].kb-focus,
 input.kb-focus,
 select.kb-focus,
-textarea.kb-focus,
-[data-action].kb-focus {
+textarea.kb-focus {
   outline: 2px solid var(--mint);
   outline-offset: 2px;
+}
+#scene:not(.mouse-nav) .btn.kb-focus,
+#scene:not(.mouse-nav) .btn.secondary.kb-focus,
+#scene:not(.mouse-nav) .btn.quiet.kb-focus,
+#scene:not(.mouse-nav) .btn.glass.kb-focus,
+#scene:not(.mouse-nav) .btn.sm.kb-focus,
+#scene:not(.mouse-nav) .icon-btn.kb-focus,
+#scene:not(.mouse-nav) .stepper.kb-focus {
+  background: var(--mint);
+  color: var(--mint-text);
+  border-color: transparent;
+}
+#scene:not(.mouse-nav) .btn.primary.kb-focus {
+  background: var(--mint);
+  color: var(--mint-text);
+}
+#scene:not(.mouse-nav) .btn.kb-focus .meta,
+#scene:not(.mouse-nav) .btn.kb-focus .hint,
+#scene:not(.mouse-nav) .btn.kb-focus .glyph:not([class*="g-"]) {
+  color: var(--mint-text);
+}
+#scene:not(.mouse-nav) .topbar button.back-btn.kb-focus,
+#scene:not(.mouse-nav) button.hint.kb-focus,
+#scene:not(.mouse-nav) .hintpill.kb-focus,
+#scene:not(.mouse-nav) .s19-link.kb-focus,
+#scene:not(.mouse-nav) .recal-card.kb-focus,
+#scene:not(.mouse-nav) .seg .opt.kb-focus:not(.sel),
+#scene:not(.mouse-nav) .chip.kb-focus:not(.sel),
+#scene:not(.mouse-nav) .s19-tab.kb-focus:not(.on) {
+  background: var(--mint);
+  color: var(--mint-text);
+  border-color: transparent;
+}
+#scene:not(.mouse-nav) .seg .opt.kb-focus:not(.sel) .sub {
+  color: var(--mint-text);
+  opacity: .7;
+}
+#scene:not(.mouse-nav) .s19-tab.on.kb-focus,
+#scene:not(.mouse-nav) .seg .opt.sel.kb-focus,
+#scene:not(.mouse-nav) .chip.sel.kb-focus {
+  background: var(--invert);
+  color: var(--invert-text);
+  box-shadow: inset 0 0 0 3px var(--mint);
+}
+#scene:not(.mouse-nav) .player-row.kb-focus {
+  background: rgba(139, 233, 195, .18);
+  border-color: var(--mint);
+}
+#scene:not(.mouse-nav) .player-row.kb-focus .player-ord { color: var(--mint); }
+#scene:not(.mouse-nav) .course-card.kb-focus:not(.is-selected) {
+  background: rgba(139, 233, 195, .14);
+  border-color: var(--mint);
+}
+#scene:not(.mouse-nav) div[data-action].kb-focus.row:not(.player-row) {
+  background: rgba(139, 233, 195, .18) !important;
+  border: 1px solid var(--mint) !important;
+  color: var(--text);
+}
+#scene:not(.mouse-nav) .toggle.kb-focus {
+  box-shadow: 0 0 0 3px var(--mint);
+}
+#scene:not(.mouse-nav) .select.kb-focus,
+#scene:not(.mouse-nav) .room-name.kb-focus,
+#scene:not(.mouse-nav) .player-name.kb-focus {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+  background: rgba(139, 233, 195, .12);
+}
+#scene:not(.mouse-nav) .action-card.kb-focus:not(.photo-card) {
+  box-shadow: inset 0 0 0 4px var(--invert);
+  filter: brightness(1.06);
+}
+#scene:not(.mouse-nav) .action-card.photo-card.kb-focus .action-card-body {
+  background: rgba(139, 233, 195, .22);
 }
 #scene.mouse-nav button.kb-focus,
 #scene.mouse-nav [tabindex].kb-focus,
@@ -169,8 +238,26 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 800; letter-spac
 
 /* ---- top bar ---- */
 .topbar {
+  position: relative; z-index: 4;
   height: 96px; display: flex; align-items: center; gap: 24px;
   padding: 0 56px; border-bottom: 1px solid var(--line);
+  background: var(--ground);
+}
+.topbar button.back-btn,
+button.always-settings {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: 999px;
+  background: var(--fill-quiet); border: 1px solid var(--line);
+  color: var(--text); font: 600 16px var(--font-body);
+}
+button.always-settings {
+  position: absolute; top: 28px; right: 56px; z-index: 40;
+  pointer-events: auto;
+}
+#scene:not(.mouse-nav) button.always-settings.kb-focus {
+  background: var(--mint);
+  color: var(--mint-text);
+  border-color: var(--mint);
 }
 .topbar .brand { font: 700 22px var(--font-display); }
 .topbar .subtitle { font: 400 18px var(--font-body); color: var(--text-muted); }
@@ -411,9 +498,24 @@ button.back-btn, button.hint {
 .feed-wrap.interactive { pointer-events: auto; cursor: crosshair; }
 .feed-wrap .feed,
 .feed-wrap .overlay { pointer-events: none; }
+.feed-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 560px;
+  gap: 24px;
+  padding: 32px 56px 48px;
+  height: calc(100% - 96px);
+  min-height: 0;
+  box-sizing: border-box;
+}
+.feed-split > .feed-slot,
+.feed-split > .col { min-width: 0; min-height: 0; }
 .feed-slot { position: relative; overflow: hidden; background: #242629; }
 .feed-slot > .feed-wrap { border-radius: inherit; }
-.feed-slot .live-pill { position: absolute; right: 24px; top: 24px; z-index: 4; pointer-events: none; }
+.feed-slot .live-pill {
+  position: absolute; right: 16px; top: 16px; z-index: 4; pointer-events: none;
+  background: rgba(21, 23, 28, .72); border: 1px solid var(--line);
+}
+.feed-slot .live-pill.is-slow { color: var(--coral); border-color: rgba(255, 107, 87, .45); }
 .feed-progress {
   position: absolute; left: 0; right: 0; top: 0; height: 4px; z-index: 5;
   background: var(--mint); transform-origin: left;

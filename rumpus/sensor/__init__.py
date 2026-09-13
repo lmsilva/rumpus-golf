@@ -31,9 +31,8 @@ def create_backend(
         b = MockBackend()
         return (b, "mock") if b.open() else (None, "none")
     if force == "webcam":
-        from .webcam import WebcamBackend
-        b = WebcamBackend(camera_index, camera_res, settings=settings)
-        return (b, "webcam") if b.open() else (None, "none")
+        b = _open_webcam(camera_index, camera_res, settings, try_others=True)
+        return (b, "webcam") if b is not None else (None, "none")
     if force in ("v1", "v2"):
         b = _try_open(force)
         return (b, force) if b is not None else (None, "none")
@@ -57,9 +56,11 @@ def create_backend(
 
     # Regular 2D webcam (color-only).
     if backend_mode in ("auto", "webcam"):
-        from .webcam import WebcamBackend
-        b = WebcamBackend(camera_index, camera_res, settings=settings)
-        if b.open():
+        b = _open_webcam(
+            camera_index, camera_res, settings,
+            try_others=(backend_mode == "webcam"),
+        )
+        if b is not None:
             return b, "webcam"
         # The user asked for a webcam — do not silently substitute the mock.
         if backend_mode == "webcam":
@@ -69,6 +70,40 @@ def create_backend(
         b = MockBackend()
         return (b, "mock") if b.open() else (None, "none")
     return None, "none"
+
+
+def _open_webcam(camera_index: int, camera_res: str, settings,
+                 try_others: bool = False) -> SensorBackend | None:
+    from .webcam import WebcamBackend
+    b = WebcamBackend(camera_index, camera_res, settings=settings)
+    if b.open():
+        return b
+    if not try_others:
+        return None
+    from .webcam import list_webcams
+    seen = {int(camera_index)}
+    for cam in list_webcams():
+        try:
+            idx = int(cam.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx in seen:
+            continue
+        seen.add(idx)
+        label = cam.get("name") or f"Camera {idx}"
+        print(f"[webcam] index {camera_index} failed — trying {idx} ({label})",
+              flush=True)
+        b = WebcamBackend(idx, camera_res, settings=settings)
+        if not b.open():
+            continue
+        if settings is not None:
+            try:
+                settings.set(idx, "camera", "device")
+                settings.save()
+            except Exception:
+                pass
+        return b
+    return None
 
 
 def _try_open(kind: str) -> SensorBackend | None:

@@ -18,7 +18,11 @@ from __future__ import annotations
 
 import logging
 import os
+import struct
 import time
+
+# Safe even if cv2 is already imported — also set in rumpus/__init__.py.
+os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 import cv2
 import numpy as np
@@ -30,7 +34,9 @@ log = logging.getLogger("rumpus.sensor.webcam")
 
 TARGET_FPS = 25.0
 MEASURE_GRABS = 30
-FALLBACK_SIZES = ((960, 540), (800, 600), (640, 480))
+HANDOFF_GRABS = 12
+GRAB_MISS_RECOVER = 6
+FALLBACK_SIZES = ((1280, 720), (960, 540), (800, 600), (640, 480))
 ORDERS = ("fourcc_first", "size_first")
 
 EXPOSURE_NOTICE = (
@@ -39,14 +45,37 @@ EXPOSURE_NOTICE = (
 )
 
 
+def _fourcc_chars(n: int) -> str:
+    chars = [chr((int(n) >> (8 * i)) & 0xFF) for i in range(4)]
+    return "".join(c if 32 <= ord(c) < 127 else "?" for c in chars)
+
+
 def fourcc_name(value) -> str:
-    """Decode an OpenCV FOURCC int to a 4-character string."""
+    """Decode an OpenCV FOURCC value to a 4-character string.
+
+    Media Foundation returns CAP_PROP_FOURCC as a float. Large FOURCC ints
+    do not survive float32, so we also reinterpret the IEEE bits.
+    """
+    candidates: list[int] = []
     try:
-        n = int(value)
+        candidates.append(int(round(float(value))))
     except (TypeError, ValueError):
         return "?"
-    chars = [chr((n >> (8 * i)) & 0xFF) for i in range(4)]
-    return "".join(c if 32 <= ord(c) < 127 else "?" for c in chars)
+    try:
+        candidates.append(struct.unpack("<I", struct.pack("<f", float(value)))[0])
+    except (TypeError, ValueError, struct.error, OverflowError):
+        pass
+    for n in candidates:
+        name = _fourcc_chars(n)
+        if name and "?" not in name:
+            return name
+    return _fourcc_chars(candidates[0]) if candidates else "?"
+
+
+def exposure_shutter(value: float) -> tuple[int, float]:
+    """(denominator of ~1/N s, theoretical fps cap) for a log2-second exposure."""
+    steps = max(1, int(round(-float(value))))
+    return (1 << steps), float(1 << steps)
 
 
 def size_ladder(width: int, height: int) -> list[tuple[int, int]]:
@@ -103,6 +132,50 @@ def _backend_api() -> int:
     return int(getattr(cv2, "CAP_ANY", 0))
 
 
+_VIRTUAL_CAM = (
+    "iriun", "obs virtual", "many-cam", "manycam", "snap camera",
+    "mmhmm", "nvidia broadcast", "xsplit",
+)
+
+
+def is_virtual_camera(name: str) -> bool:
+    n = (name or "").lower()
+    return any(token in n for token in _VIRTUAL_CAM)
+
+
+def unique_device_label(names: list[str], index: int) -> str:
+    """Disambiguate duplicate driver names: 'HD Pro Webcam C920 (2)'."""
+    if index < 0 or index >= len(names):
+        return f"Camera {index}"
+    name = names[index]
+    same = [i for i, n in enumerate(names) if n == name]
+    if len(same) <= 1:
+        return name
+    return f"{name} ({same.index(index) + 1})"
+
+
+def alternate_device_indices(index: int, names: list[str] | None = None) -> list[int]:
+    """Same-name siblings first (the other C920 listing), then other real cams."""
+    if names is None:
+        try:
+            from .devices import list_capture_names
+            names = list_capture_names()
+        except Exception:
+            return []
+    idx = int(index)
+    mine = names[idx] if 0 <= idx < len(names) else None
+    siblings: list[int] = []
+    others: list[int] = []
+    for i, n in enumerate(names):
+        if i == idx:
+            continue
+        if mine and n == mine:
+            siblings.append(i)
+        elif not is_virtual_camera(n):
+            others.append(i)
+    return siblings + others
+
+
 def list_webcams(max_index: int = 8, probe: bool = False) -> list[dict]:
     """Return capture devices with driver names.
 
@@ -114,7 +187,8 @@ def list_webcams(max_index: int = 8, probe: bool = False) -> list[dict]:
     names = list_capture_names()
     if names and not probe:
         return [
-            {"index": i, "name": n, "driver": n, "working": True}
+            {"index": i, "name": unique_device_label(names, i),
+             "driver": n, "working": True}
             for i, n in enumerate(names)
         ]
     cams: list[dict] = []
@@ -154,7 +228,38 @@ def _apply_format(cap: cv2.VideoCapture, w: int, h: int, order: str) -> tuple[in
         fcc = fourcc_name(cap.get(cv2.CAP_PROP_FOURCC))
     except Exception:
         aw, ah, fcc = w, h, "?"
+    if not fcc or "?" in fcc:
+        fcc = "unknown"
+    try:
+        cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
+    except Exception:
+        pass
+    # C920 at 1080p often stays on YUY2 (~5 fps) unless MJPG is forced again.
+    if fcc.upper() in ("YUY2", "YUYV") and w >= 1280:
+        cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(w))
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(h))
+        cap.set(cv2.CAP_PROP_FPS, 30.0)
+        try:
+            aw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or aw)
+            ah = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or ah)
+            fcc = fourcc_name(cap.get(cv2.CAP_PROP_FOURCC)) or fcc
+        except Exception:
+            pass
+        if not fcc or "?" in fcc:
+            fcc = "unknown"
     return aw, ah, fcc
+
+
+def _prime_exposure(cap: cv2.VideoCapture, api_name: str, exposure: float) -> None:
+    """Best-effort manual exposure so fps is measured at the shutter we'll use."""
+    for manual, _auto in exposure_pairs(api_name):
+        try:
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, manual)
+            cap.set(cv2.CAP_PROP_EXPOSURE, float(exposure))
+            return
+        except Exception:
+            continue
 
 
 def _open_index(index: int, api: int) -> cv2.VideoCapture | None:
@@ -181,30 +286,53 @@ def _release(cap: cv2.VideoCapture | None) -> None:
         pass
 
 
+def frame_has_picture(frame) -> bool:
+    """False for the empty near-black buffers MSMF often returns at 30 fps."""
+    if frame is None:
+        return False
+    try:
+        img = np.asarray(frame)
+    except Exception:
+        return False
+    if img.size == 0 or img.ndim < 2:
+        return False
+    sample = img[::8, ::8]
+    mean = float(sample.mean())
+    std = float(sample.std())
+    peak = float(sample.max())
+    if peak < 16.0 and mean < 8.0:
+        return False
+    if std < 2.0 and mean < 12.0:
+        return False
+    return True
+
+
 def measure_fps(cap: cv2.VideoCapture, n: int = MEASURE_GRABS) -> float:
-    """Time grabs. Bail early if the first slice is already far below 25."""
+    """Time grabs that actually contain a picture. Black MSMF buffers do not count."""
     for _ in range(5):
         try:
             cap.read()
         except Exception:
             pass
     t0 = time.perf_counter()
-    ok_n = 0
+    pictured = 0
     for i in range(n):
         try:
-            ok, _frame = cap.read()
+            ok, frame = cap.read()
         except Exception:
-            ok = False
-        if ok:
-            ok_n += 1
+            ok, frame = False, None
+        if ok and frame_has_picture(frame):
+            pictured += 1
         if i == 9:
             elapsed = time.perf_counter() - t0
-            if elapsed > 0 and ok_n / elapsed < 12.0:
-                return ok_n / elapsed
+            if pictured == 0:
+                return 0.0
+            if elapsed > 0 and pictured / elapsed < 12.0:
+                return pictured / elapsed
     elapsed = time.perf_counter() - t0
-    if elapsed <= 0 or ok_n < 2:
+    if elapsed <= 0 or pictured < 2:
         return 0.0
-    return ok_n / elapsed
+    return pictured / elapsed
 
 
 def _mean_brightness(cap: cv2.VideoCapture, n: int = 6) -> float:
@@ -223,14 +351,14 @@ class WebcamBackend(SensorBackend):
     def __init__(self, index: int = 0, resolution: str = "1280x720",
                  settings=None) -> None:
         w, h = parse_resolution(resolution)
-        self.index = index
+        self.index = int(index)
         self.want_resolution = (w, h)
         self.resolution = (w, h)
         self._settings = settings
         try:
             from .devices import list_capture_names
             names = list_capture_names()
-            model = names[index] if 0 <= index < len(names) else f"Webcam {index}"
+            model = unique_device_label(names, index) if names else f"Webcam {index}"
         except Exception:
             model = f"Webcam {index}"
         self.description = SensorDescription(
@@ -240,7 +368,7 @@ class WebcamBackend(SensorBackend):
             fov_h_deg=70.0,
             reliable_min_m=0.5,
             reliable_max_m=5.0,
-            note="Color-only — floor mapped by a 4-corner homography.",
+            note="Webcam — no depth. Floor mapped by a 4-corner homography.",
             fps=30,
             exposure_control=True,
             fourcc="",
@@ -256,6 +384,11 @@ class WebcamBackend(SensorBackend):
         self._measured_fps = 30.0
         self._locked = False
         self._exposure = -6.0
+        if settings is not None:
+            try:
+                self._exposure = float(settings.get("camera", "exposure", default=-6) or -6)
+            except (TypeError, ValueError):
+                self._exposure = -6.0
         self._ignored: list[str] = []
         self._grab_times: list[float] = []
         self._api_name = "dshow"
@@ -264,6 +397,9 @@ class WebcamBackend(SensorBackend):
         self._ae_manual = 0.25
         self._ae_auto = 0.75
         self._stepped_down = False
+        self._misses = 0
+        self._recovering = False
+        self._recover_after = 0.0
 
     @property
     def has_depth(self) -> bool:
@@ -272,19 +408,102 @@ class WebcamBackend(SensorBackend):
     def open(self) -> bool:
         # DirectShow is exclusive and can need a beat after another handle
         # (our own enumerator, Zoom, etc.) lets go.
-        for attempt in range(3):
+        tried = {int(self.index)}
+        if self._negotiate():
+            self._probe_exposure()
+            self._persist_cache()
+            self._opened = True
+            return True
+        # Exclusive APIs sometimes need a beat after Zoom / our enumerator.
+        time.sleep(0.35)
+        if self._negotiate():
+            self._probe_exposure()
+            self._persist_cache()
+            self._opened = True
+            return True
+        # Windows often lists the same webcam twice; one moniker is a black
+        # stub, the other has the picture. Try the sibling index next.
+        for idx in alternate_device_indices(self.index):
+            if idx in tried:
+                continue
+            print(f"[webcam] index {self.index} has no picture — trying {idx}",
+                  flush=True)
+            self.index = idx
+            tried.add(idx)
+            try:
+                from .devices import list_capture_names
+                names = list_capture_names()
+                if 0 <= idx < len(names):
+                    self.description.model = unique_device_label(names, idx)
+            except Exception:
+                self.description.model = f"Webcam {idx}"
             if self._negotiate():
                 self._probe_exposure()
                 self._persist_cache()
                 self._opened = True
                 return True
-            time.sleep(0.35)
         return False
 
     def close(self) -> None:
         _release(self._cap)
         self._cap = None
         self._opened = False
+        self._last = None
+        self._misses = 0
+
+    def detach_handle(self) -> None:
+        """Drop the capture handle but keep the negotiated plan.
+
+        Media Foundation (and often DirectShow) only grab reliably on the
+        thread that opened the handle. Background negotiation opens, then
+        the game loop calls ``reopen_on_this_thread``.
+        """
+        _release(self._cap)
+        self._cap = None
+        self._opened = False
+        self._last = None
+
+    def reopen_on_this_thread(self, full: bool = False) -> bool:
+        """Open a pictured stream on the calling thread.
+
+        Tries the other API and 720p first — MSMF at 1080p often returns a
+        30 fps black buffer that still counts as a successful ``read()``.
+        """
+        _release(self._cap)
+        self._cap = None
+        self._last = None
+        sizes: list[tuple[int, int]] = [self.resolution]
+        if os.name == "nt":
+            sizes.append((1280, 720))
+        sizes.append(self.want_resolution)
+        uniq: list[tuple[int, int]] = []
+        seen_sz: set[tuple[int, int]] = set()
+        for sz in sizes:
+            if sz[0] > 0 and sz not in seen_sz:
+                seen_sz.add(sz)
+                uniq.append(sz)
+        others = [name for name, _code in capture_apis() if name != self._api_name]
+        candidates = [self._api_name] + others
+        orders = [self._order] + [o for o in ORDERS if o != self._order]
+        tried: set[tuple[str, str, int, int]] = set()
+        for w, h in uniq:
+            for api_name in candidates:
+                for order in orders:
+                    key = (api_name, order, w, h)
+                    if key in tried:
+                        continue
+                    tried.add(key)
+                    if self._open_plan(api_name, order, w, h):
+                        self._opened = True
+                        self._misses = 0
+                        self._persist_cache()
+                        return True
+        if full:
+            if self.open():
+                self._misses = 0
+                return True
+        self._opened = False
+        return False
 
     def is_open(self) -> bool:
         return self._opened
@@ -297,10 +516,39 @@ class WebcamBackend(SensorBackend):
             ok, frame = cap.read()
         except Exception:
             ok, frame = False, None
-        if not ok or frame is None:
+        pictured = bool(ok and frame is not None and frame_has_picture(frame))
+        if not pictured:
+            self._misses += 1
+            if (
+                self._misses >= GRAB_MISS_RECOVER
+                and not self._recovering
+                and time.time() >= self._recover_after
+            ):
+                self._recovering = True
+                try:
+                    print("[webcam] stream stalled — reopening on this thread",
+                          flush=True)
+                    if self.reopen_on_this_thread(full=False):
+                        self._misses = 0
+                        cap = self._cap
+                        if cap is not None:
+                            try:
+                                ok, frame = cap.read()
+                            except Exception:
+                                ok, frame = False, None
+                            pictured = bool(
+                                ok and frame is not None and frame_has_picture(frame)
+                            )
+                    else:
+                        self._recover_after = time.time() + 2.5
+                        self._misses = 0
+                finally:
+                    self._recovering = False
+        if not pictured:
             if self._last is not None:
                 return self._last
             return Frame(color=None, depth=None, t=time.time(), source="webcam")
+        self._misses = 0
         color = np.asarray(frame, dtype=np.uint8)
         now = time.time()
         self._grab_times.append(now)
@@ -382,6 +630,8 @@ class WebcamBackend(SensorBackend):
             "capture_api": self._api_name,
             "negotiated_resolution": f"{self.resolution[0]}x{self.resolution[1]}",
             "show_driver_settings": os.name == "nt" and not self._exposure_control,
+            "shutter_denom": exposure_shutter(self._exposure)[0],
+            "shutter_fps_cap": exposure_shutter(self._exposure)[1],
         }
 
     # -- negotiation -------------------------------------------------------- #
@@ -389,15 +639,31 @@ class WebcamBackend(SensorBackend):
         want_w, want_h = self.want_resolution
         cached = self._cached_config()
         plans = self._plans(want_w, want_h, cached)
-        best = None  # (fps, cap, meta)
+        best = None  # (fps, api_name, order, w, h, aw, ah, fcc)
+        cur_size: tuple[int, int] | None = None
+        size_max_fps = 0.0
+        black_sizes = 0
 
         for api_name, api, order, w, h in plans:
+            if cur_size != (w, h):
+                if cur_size is not None:
+                    if size_max_fps < 1.0:
+                        black_sizes += 1
+                        if black_sizes >= 2:
+                            print(f"[webcam] index {self.index} has no picture "
+                                  f"— skipping remaining sizes", flush=True)
+                            return False
+                    else:
+                        black_sizes = 0
+                cur_size = (w, h)
+                size_max_fps = 0.0
             cap = _open_index(self.index, api)
             if cap is None:
                 log.info("webcam skip %s (could not open index %s)",
                          api_label(api_name), self.index)
                 continue
             aw, ah, fcc = _apply_format(cap, w, h, order)
+            _prime_exposure(cap, api_name, self._exposure)
             fps = measure_fps(cap)
             line = (f"[webcam] {api_label(api_name)} order={order} "
                     f"asked {w}x{h} got {aw}x{ah} FOURCC={fcc} "
@@ -412,26 +678,46 @@ class WebcamBackend(SensorBackend):
                     str(cached.get("order") or ""),
                     cw, ch,
                 )
-            if fps >= TARGET_FPS or (
+            accept = fps >= TARGET_FPS or (
                 cache_hit and cached.get("ok") is False and fps >= 5.0
-            ):
+            )
+            if accept:
                 self._adopt(cap, api_name, order, aw, ah, fcc, fps,
                             asked=(w, h), want=(want_w, want_h))
                 return True
-            meta = (api_name, order, aw, ah, fcc, fps)
+            # Release before the next open — exclusive APIs (DShow/MSMF)
+            # cannot share the device, so a held runner-up blocks the rest.
+            _release(cap)
+            size_max_fps = max(size_max_fps, fps)
             if best is None or fps > best[0]:
-                if best is not None:
-                    _release(best[1])
-                best = (fps, cap, meta)
-            else:
-                _release(cap)
+                best = (fps, api_name, order, w, h, aw, ah, fcc)
 
-        if best is None:
+        if best is None or best[0] < 5.0:
             return False
-        fps, cap, meta = best
-        api_name, order, aw, ah, fcc, fps = meta
+        fps, api_name, order, w, h, aw, ah, fcc = best
+        return self._open_plan(api_name, order, w, h)
+
+    def _open_plan(self, api_name: str, order: str, w: int, h: int) -> bool:
+        """Open one API/size/order on this thread. True when grabs stay alive."""
+        api = dict(capture_apis()).get(api_name)
+        if api is None:
+            return False
+        cap = _open_index(self.index, api)
+        if cap is None:
+            return False
+        aw, ah, fcc = _apply_format(cap, w, h, order)
+        _prime_exposure(cap, api_name, self._exposure)
+        fps = measure_fps(cap, n=HANDOFF_GRABS)
+        line = (f"[webcam] {api_label(api_name)} order={order} "
+                f"asked {w}x{h} got {aw}x{ah} FOURCC={fcc} "
+                f"handoff {fps:.1f} fps")
+        log.info(line)
+        print(line, flush=True)
+        if fps < 5.0:
+            _release(cap)
+            return False
         self._adopt(cap, api_name, order, aw, ah, fcc, fps,
-                    asked=(aw, ah), want=(want_w, want_h))
+                    asked=(w, h), want=self.want_resolution)
         return True
 
     def _plans(self, want_w: int, want_h: int, cached: dict | None):
@@ -443,11 +729,19 @@ class WebcamBackend(SensorBackend):
             api_name = str(cached.get("api") or "")
             order = str(cached.get("order") or "fourcc_first")
             cw, ch = parse_resolution(str(cached.get("resolution") or f"{want_w}x{want_h}"))
-            api_code = dict(apis).get(api_name)
+            by_name = dict(apis)
+            # DirectShow first at the known-good size. MSMF often measures
+            # fine then dies on the next thread (HRESULT -1072873821).
+            if os.name == "nt" and "dshow" in by_name:
+                key = ("dshow", order, cw, ch)
+                seen.add(key)
+                out.append(("dshow", by_name["dshow"], order, cw, ch))
+            api_code = by_name.get(api_name)
             if api_code is not None:
                 key = (api_name, order, cw, ch)
-                seen.add(key)
-                out.append((api_name, api_code, order, cw, ch))
+                if key not in seen:
+                    seen.add(key)
+                    out.append((api_name, api_code, order, cw, ch))
         for w, h in sizes:
             for api_name, api_code in apis:
                 for order in ORDERS:
@@ -480,7 +774,7 @@ class WebcamBackend(SensorBackend):
                 f"(driver refused MJPG at {want[0]}×{want[1]})."
             )
         else:
-            self.description.note = "Color-only — floor mapped by a 4-corner homography."
+            self.description.note = "Webcam — no depth. Floor mapped by a 4-corner homography."
         self.cam = CameraModel(
             fx=float(w), fy=float(w), cx=w / 2.0, cy=h / 2.0, color_scale=1.0
         )
@@ -498,6 +792,13 @@ class WebcamBackend(SensorBackend):
             return None
         if str(raw.get("want") or "") != want:
             return None
+        if "exposure" not in raw:
+            return None
+        try:
+            if abs(float(raw.get("exposure")) - float(self._exposure)) > 0.1:
+                return None
+        except (TypeError, ValueError):
+            return None
         return raw
 
     def _persist_cache(self) -> None:
@@ -512,8 +813,14 @@ class WebcamBackend(SensorBackend):
             "fourcc": self.description.fourcc,
             "fps": float(round(self._measured_fps, 1)),
             "ok": self._measured_fps >= TARGET_FPS,
+            "exposure": float(self._exposure),
         }
         self._settings.set(payload, "camera", "negotiated")
+        try:
+            if int(self._settings.get("camera", "device", default=self.index)) != int(self.index):
+                self._settings.set(int(self.index), "camera", "device")
+        except (TypeError, ValueError):
+            self._settings.set(int(self.index), "camera", "device")
         try:
             self._settings.save()
         except Exception:

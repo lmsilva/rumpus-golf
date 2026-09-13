@@ -9,4 +9,10 @@ The seam is deliberate: everything above the sensor layer is sensor-agnostic so
 a future tablet/AR edition can swap only the detector (see requirements).
 """
 
+import os
+
+# Must be set before OpenCV loads. Media Foundation HW transforms often open
+# a webcam then fail every grab with HRESULT -1072873821.
+os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
+
 __version__ = "0.4.1"
