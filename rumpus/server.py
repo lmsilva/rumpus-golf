@@ -100,11 +100,17 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                 if last_move is not None:
                     engine.handle_input(last_move)
 
-            drain_input()
-            engine.tick(frame)
-            drain_input()
-            jpeg = engine.encode_frame()
-            broadcaster.publish(engine.snapshot(), jpeg)
+            try:
+                drain_input()
+                engine.tick(frame)
+                drain_input()
+                jpeg = engine.encode_frame()
+                broadcaster.publish(engine.snapshot(), jpeg)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                time.sleep(0.2)
+                continue
             time.sleep(interval)
 
     thread = threading.Thread(target=loop, daemon=True)

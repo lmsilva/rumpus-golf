@@ -166,6 +166,9 @@ window.RG = window.RG || {};
   }
 
   RG.feed = {
+    detach() {
+      if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    },
     show(v, slot) {
       ensure();
       if (!v) {

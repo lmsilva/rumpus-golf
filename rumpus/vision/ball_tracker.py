@@ -61,6 +61,21 @@ class BallTracker:
             b.lost = False
             b.last_seen_t = -np.inf
 
+    def seed_position(self, ball_id: str, pos: tuple[float, float], now: float | None = None) -> None:
+        ball = self.balls.get(ball_id)
+        if ball is None or pos is None:
+            return
+        now = now if now is not None else time.time()
+        ball.position = (float(pos[0]), float(pos[1]))
+        ball.smoothed = (float(pos[0]), float(pos[1]))
+        ball.history.clear()
+        ball.history.append((now, float(pos[0]), float(pos[1])))
+        ball.last_seen_t = now
+        ball.moving = False
+        ball.hidden = False
+        ball.hidden_estimate = None
+        ball.lost = False
+
     # ------------------------------------------------------------------ #
     def update(self, color_bgr, depth_mm, mapper: FloorMapper, cam: CameraModel,
                plane, confirmed_obstacles: list, now: float | None = None,

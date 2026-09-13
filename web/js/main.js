@@ -44,6 +44,7 @@ window.RG = window.RG || {};
 
     if (rebuild) {
       const keep = focusKey(document.activeElement);
+      if (RG.feed && RG.feed.detach) RG.feed.detach();
       scene.innerHTML = RG.screens.render(st);
       lastScreen = screen;
       lastSignature = sig;
@@ -57,6 +58,7 @@ window.RG = window.RG || {};
     RG.feed.show((FEED_SCREENS.has(screen) && feedOn) || !!slot, slot);
     RG.feed.overlay((st.overlay && st.overlay.shapes) || []);
     patchS05(st);
+    patchS11(st);
     handleMusic(st);
   }
 
@@ -82,10 +84,10 @@ window.RG = window.RG || {};
     if (st.screen === "S15") return `${st.ui && st.ui.focus}|${st.ui && st.ui.recal_flyout ? 1 : 0}`;
     if (st.screen !== "S11") return "";
     const g = st.game || {};
-    const a = st.ui && st.ui.active_player;
-    const m = st.ui && st.ui.motion;
-    const others = (st.ui.others || []).map((p) => `${p.id}:${(g.scores[p.id] || [])[g.hole - 1] || 0}`).join(",");
-    return [a && a.id, a && a.name, g.hole, (g.scores[a && a.id] || [])[g.hole - 1] || 0, m && m.moving, m && m.hidden, m && m.dist_to_cup, others].join("|");
+    const ui = st.ui || {};
+    const a = ui.active_player;
+    const others = (ui.others || []).map((p) => `${p.id}:${(g.scores[p.id] || [])[g.hole - 1] || 0}`).join(",");
+    return [a && a.id, g.hole, (g.scores[a && a.id] || [])[g.hole - 1] || 0, ui.awaiting_tee ? 1 : 0, others].join("|");
   }
 
   function settingsSig(st) {
@@ -131,6 +133,44 @@ window.RG = window.RG || {};
     scene.querySelectorAll("button.btn[data-action=confirm]").forEach((btn) => {
       btn.disabled = colorOnly && n < 4;
     });
+  }
+
+  function playStatusText(st) {
+    const ui = st.ui || {};
+    const a = ui.active_player;
+    const motion = ui.motion || {};
+    const strokes = a ? ((st.game && st.game.scores[a.id]) || [])[st.game.hole - 1] || 0 : 0;
+    if (!a) return "";
+    if (motion.moving) return "Ball rolling…";
+    if (motion.hidden) return "Stopped, hidden — position estimated";
+    if (ui.awaiting_tee) {
+      if (ui.in_start) return "In the start zone. Putt when ready, or confirm.";
+      if (ui.ball_seen) return "Move it into the start circle, click it on the camera, or confirm when ready.";
+      return "I don’t see your ball yet — click it on the camera, or confirm when it’s ready.";
+    }
+    return strokes === 0 ? "Ready. Putt when ready." : "Ball stopped. Putt when ready.";
+  }
+
+  function playPillText(st) {
+    const ui = st.ui || {};
+    const motion = ui.motion || {};
+    if (ui.awaiting_tee) {
+      if (ui.in_start) return "In start zone · waiting for putt";
+      if (ui.ball_seen) return "Ball seen · not in the start circle yet";
+      return "Looking for your ball";
+    }
+    if (motion.moving) return "Ball moving";
+    if (motion.hidden) return "Ball stopped, hidden · position estimated";
+    if (motion.dist_to_cup != null) return `Ball stopped · ${motion.dist_to_cup} m from cup`;
+    return "Ball stopped";
+  }
+
+  function patchS11(st) {
+    if (st.screen !== "S11") return;
+    const status = scene.querySelector("[data-play-status]");
+    if (status) status.textContent = playStatusText(st);
+    const pill = scene.querySelector("[data-play-pill]");
+    if (pill) pill.textContent = playPillText(st);
   }
 
   function handleMusic(st) {

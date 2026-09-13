@@ -71,7 +71,8 @@ SCREEN_BY_STATE = {
 }
 
 FEED_STATES = {S.VERIFY, S.CAL_FLOOR, S.CAL_AREA, S.CAL_PLACE, S.CAL_OBSTACLES,
-               S.CAL_CUP, S.CAL_BALLS, S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB, S.HOLE_START}
+               S.CAL_CUP, S.CAL_BALLS, S.GAME_START, S.PLAY, S.TURN_CHANGE,
+               S.HOLE_OUT, S.OOB, S.HOLE_START}
 
 # Esc / Menu opens pause so the player can quit or recalibrate.
 IN_GAME_STATES = {
@@ -169,6 +170,8 @@ class GameEngine:
         self._last_turn_player: str | None = None
         self._prev_strokes: dict[str, int] = {}
         self._ball_was_moving: dict[str, bool] = {}
+        self._shot_armed = False
+        self._tee_seen_since = 0.0
 
         # Settings return-state.
         self._settings_return: str = S.BOOT
@@ -316,7 +319,7 @@ class GameEngine:
                 self._accumulate_color(self._frame_color)
             if self.state == S.CAL_BALLS:
                 self._maybe_scan_setup_balls(now)
-            if self.state in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
+            if self.state in (S.GAME_START, S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
                 if self.mapper is not None:
                     self.tracker.update(self._frame_color, None, self.mapper,
                                         self.cam, self.plane, self._confirmed_obstacles(), now,
@@ -331,7 +334,7 @@ class GameEngine:
         if now < self._capture_until:
             self._accumulate_depth(self._frame_depth)
         # Play state: track balls.
-        if self.state in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
+        if self.state in (S.GAME_START, S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
             if self.mapper is not None and self.plane is not None:
                 obs = self._confirmed_obstacles()
                 self.tracker.update(self._frame_color, self._frame_depth, self.mapper,
@@ -1347,9 +1350,9 @@ class GameEngine:
     def _play_action(self, action: str) -> None:
         if action == "undo":
             self._undo_last_shot()
-        elif action == "confirm":
-            # "Course is set" from new-object prompt handled elsewhere; no-op.
-            pass
+        elif action in ("confirm", "ready"):
+            if not self._shot_armed:
+                self._arm_shot()
 
     def _enter_pause(self) -> None:
         if self.state == S.PAUSE:
@@ -1556,7 +1559,10 @@ class GameEngine:
         elif st == S.CAL_OBSTACLES:
             self._pointer_obstacles(ptype, nx, ny)
         elif st == S.PLAY and ptype == "down":
-            self._pointer_putt(nx, ny)
+            if not self._shot_armed:
+                self._pointer_place_tee(nx, ny)
+            else:
+                self._pointer_putt(nx, ny)
 
     def _feed_to_floor(self, nx: float, ny: float) -> tuple[float, float] | None:
         if self.mapper is None:
@@ -1711,6 +1717,19 @@ class GameEngine:
             if point_in_polygon(f[0], f[1], o.polygon):
                 return i
         return None
+
+    def _pointer_place_tee(self, nx: float, ny: float) -> None:
+        """Click the live feed to tell the game where the teeing ball is."""
+        floor = self._feed_to_floor(nx, ny)
+        if floor is None:
+            return
+        bid = self._active_ball_id()
+        if bid is None:
+            return
+        self._ball_positions[bid] = (float(floor[0]), float(floor[1]))
+        self.tracker.seed_position(bid, (float(floor[0]), float(floor[1])))
+        if self._in_start_zone(floor):
+            self._arm_shot()
 
     def _pointer_putt(self, nx: float, ny: float) -> None:
         if self._putt is not None:
@@ -1934,12 +1953,15 @@ class GameEngine:
         # Build players from ball setup if not already.
         self._derive_players_from_balls()
         self.course_ids = [course_for_hole(h) for h in range(1, self.holes + 1)]
-        self.course_pars = [course_by_id(c)["par"] for c in self.course_ids]
+        self.course_pars = [(course_by_id(c) or {}).get("par", 3) for c in self.course_ids]
         self.player_scores = {p.id: [None] * self.holes for p in self.players}
         self.hole = 1
         self.active_index = 0
         self.events.clear()
-        self._save_setup()
+        try:
+            self._save_setup()
+        except Exception:
+            pass
         self._enter_hole()
 
     def _derive_players_from_balls(self) -> None:
@@ -1977,28 +1999,40 @@ class GameEngine:
         self.setup.save()
 
     def _enter_hole(self) -> None:
-        self.current_course_id = self.course_ids[self.hole - 1]
-        self.layout = CourseLayout(course_by_id(self.current_course_id), self.setup.play_area)
+        if self.hole - 1 < len(self.course_ids):
+            self.current_course_id = self.course_ids[self.hole - 1]
+        course = course_by_id(self.current_course_id) or load_courses()[0]
+        self.current_course_id = course["id"]
+        area = self.setup.play_area or [(-1.5, -1.0), (1.5, -1.0), (1.5, 1.0), (-1.5, 1.0)]
+        self.layout = CourseLayout(course, area)
         self.finished_hole = {p.id: False for p in self.players}
         # First unfinished player to lead.
         self.active_index = 0
         self._rebuilding = self.hole > 1
         self._putt = None
         self._ball_was_moving = {}
+        s = self.layout.start
+        self.setup.start = CircleZone(s["x"], s["y"], s.get("r", 0.15))
         # Mock: move the physical cup to the new course's hole.
         if self._rebuilding and self.is_mock and self.layout is not None:
             self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], 0.045)
-        # Position balls in the start zone for the first stroke.
+        # Keep the last seen webcam positions. Only the mock tees off for you.
         for i, p in enumerate(self.players):
             ball_id = self.ball_for_player.get(p.id, f"ball{i}")
-            sx = self.layout.start["x"] + 0.15 * i
-            sy = self.layout.start["y"]
-            self._ball_positions[ball_id] = (sx, sy)
-            idx = int(ball_id.replace("ball", ""))
-            if 0 <= idx < len(self._mock_balls):
-                self._mock_balls[idx]["x"] = sx
-                self._mock_balls[idx]["y"] = sy
-        self.tracker.reset_positions()
+            if self.is_mock:
+                sx = s["x"] + 0.15 * i
+                sy = s["y"]
+                self._ball_positions[ball_id] = (sx, sy)
+                raw = ball_id.replace("ball", "")
+                if raw.isdigit():
+                    idx = int(raw)
+                    if 0 <= idx < len(self._mock_balls):
+                        self._mock_balls[idx]["x"] = sx
+                        self._mock_balls[idx]["y"] = sy
+            pos = self._ball_positions.get(ball_id)
+            if pos is not None:
+                self.tracker.seed_position(ball_id, pos)
+        self._sync_shot_arm()
         if self.hole > 1:
             self._set_state(S.HOLE_START)
         else:
@@ -2023,7 +2057,7 @@ class GameEngine:
         return [o for o in self.setup.obstacles if o.state == "confirmed"]
 
     def _apply_ball_motion(self, now: float) -> None:
-        if self.state != S.PLAY:
+        if self.state not in (S.PLAY, S.GAME_START):
             return
         p = self._active_player()
         if p is None:
@@ -2032,7 +2066,21 @@ class GameEngine:
         tb = self.tracker.balls.get(ball_id) if ball_id else None
         if tb is None:
             return
-        strokes = self._current_strokes(p.id)
+        if tb.smoothed is not None:
+            self._ball_positions[ball_id] = tb.smoothed
+        if self.state != S.PLAY:
+            return
+        if not self._shot_armed:
+            pos = tb.smoothed
+            if pos is not None and not tb.moving and not tb.lost and self._in_start_zone(pos):
+                if self._tee_seen_since <= 0:
+                    self._tee_seen_since = now
+                elif now - self._tee_seen_since >= 0.5:
+                    self._arm_shot()
+            else:
+                self._tee_seen_since = 0.0
+            self._ball_was_moving[ball_id] = False
+            return
         was_moving = self._ball_was_moving.get(ball_id, False)
         # Stroke on stopped -> moving.
         if tb.moving and not was_moving:
@@ -2041,9 +2089,32 @@ class GameEngine:
         # Resolve when the ball stops.
         if not tb.moving and was_moving:
             self._resolve_after_stop(p, tb, now)
-        # Position for HUD.
-        if tb.smoothed is not None:
-            self._ball_positions[ball_id] = tb.smoothed
+
+    def _in_start_zone(self, pos: tuple[float, float] | None) -> bool:
+        if pos is None or self.setup.start is None:
+            return False
+        s = self.setup.start
+        return float(np.hypot(pos[0] - s.x, pos[1] - s.y)) <= (s.r + 0.08)
+
+    def _sync_shot_arm(self) -> None:
+        p = self._active_player()
+        if p is None:
+            self._shot_armed = False
+            self._tee_seen_since = 0.0
+            return
+        # Later strokes already lie on the course — no tee required.
+        self._shot_armed = self._current_strokes(p.id) > 0
+        self._tee_seen_since = 0.0
+
+    def _arm_shot(self) -> None:
+        self._shot_armed = True
+        self._tee_seen_since = 0.0
+        bid = self._active_ball_id()
+        if bid:
+            self._ball_was_moving[bid] = False
+            pos = self._ball_positions.get(bid)
+            if pos is not None:
+                self.tracker.seed_position(bid, pos)
 
     def _current_strokes(self, pid: str) -> int:
         sc = self.player_scores.get(pid, [])
@@ -2093,6 +2164,8 @@ class GameEngine:
                 break
         if all(self.finished_hole.get(p.id, False) for p in self.players):
             self._transition_next = S.HOLE_COMPLETE
+        else:
+            self._sync_shot_arm()
 
     def _undo_last_shot(self) -> None:
         e = self.events.pop_last_for_hole(self.hole)
@@ -2109,6 +2182,7 @@ class GameEngine:
             if pl.id == pid:
                 self.active_index = i
                 break
+        self._sync_shot_arm()
         self._set_state(S.PLAY)
 
     def _adjust_score(self, pid: str, delta: int) -> None:
@@ -2336,6 +2410,9 @@ class GameEngine:
     def _hud_snapshot(self) -> dict:
         active = self._active_player()
         motion = self._ball_motion_status()
+        bid = self._active_ball_id()
+        tb = self.tracker.balls.get(bid) if bid else None
+        pos = tb.smoothed if tb is not None and tb.smoothed is not None else self._ball_positions.get(bid)
         return {
             "active_player": active.as_dict() if active else None,
             "others": [p.as_dict() for p in self.players if p.id != (active.id if active else None)],
@@ -2345,6 +2422,9 @@ class GameEngine:
             "scores": self.player_scores,
             "finished_hole": self.finished_hole,
             "lost_balls": self._lost_ball_snapshot(),
+            "awaiting_tee": not self._shot_armed,
+            "in_start": self._in_start_zone(pos),
+            "ball_seen": bool(tb is not None and tb.position is not None and not tb.lost),
         }
 
     def _ball_motion_status(self) -> dict:
@@ -2568,9 +2648,15 @@ class GameEngine:
         if self.setup.start is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.start.x, self.setup.start.y)
             ru = self.mapper.radius_to_pixels(self.setup.start.x, self.setup.start.y, self.setup.start.r)
+            waiting = st == S.PLAY and not self._shot_armed
             o["shapes"].append({"type": "circle", "x": u / self._feed_w, "y": v / self._feed_h,
-                                "r": ru / self._feed_w, "stroke": "#f2efe8", "stroke_width": 3,
-                                "fill": "none", "label": "START", "id": "start"})
+                                "r": ru / self._feed_w,
+                                "stroke": "#8be9c3" if waiting else "#f2efe8",
+                                "stroke_width": 5 if waiting else 3,
+                                "dash": "10 8" if waiting else "",
+                                "fill": "rgba(139,233,195,0.12)" if waiting else "none",
+                                "label": "START — put the ball here" if waiting else "START",
+                                "id": "start"})
         # Hole.
         if self.setup.hole is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y)

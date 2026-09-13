@@ -470,7 +470,8 @@ S.S11 = function (st) {
   const scores = ui.scores || {};
   const finished = ui.finished_hole || {};
   const activeStrokes = a ? (scores[a.id] || [])[st.game.hole - 1] || 0 : 0;
-  const status = !a ? "" : motion.moving ? "Ball rolling…" : motion.hidden ? "Stopped, hidden — position estimated" : activeStrokes === 0 ? "Place your ball in the start zone" : "Ball stopped. Putt when ready.";
+  const awaiting = !!ui.awaiting_tee;
+  const status = playStatus(ui, a, activeStrokes);
   return `
   <div style="position:absolute;inset:40px;z-index:6;pointer-events:none;display:flex;flex-direction:column">
     <div class="row" style="gap:16px;align-items:stretch">
@@ -479,7 +480,7 @@ S.S11 = function (st) {
         <div style="width:2px;align-self:stretch;background:rgba(var(--ground-rgb),.25)"></div>
         <div><div class="kicker" style="opacity:.7;color:var(--player-text)">Stroke</div><div style="font:800 76px/1.15 var(--font-display)">${activeStrokes}</div></div>
         <div style="width:2px;align-self:stretch;background:rgba(var(--ground-rgb),.25)"></div>
-        <div style="font:600 26px/1.25 var(--font-body);max-width:420px;opacity:.85">${esc(status)}</div>
+        <div data-play-status style="font:600 26px/1.25 var(--font-body);max-width:420px;opacity:.85">${esc(status)}</div>
       </div>` : ""}
       <div class="row" style="margin-left:auto;gap:10px;align-items:stretch">
         ${others.map((p) => `<div class="glass" style="border-radius:20px;padding:20px 24px;min-width:190px">
@@ -493,13 +494,39 @@ S.S11 = function (st) {
       <div style="font:800 34px/1 var(--font-display)">${esc(course.name || "")}</div>
     </div>
     <div class="row" style="position:absolute;right:0;bottom:0;gap:10px;pointer-events:auto">
+      ${awaiting ? `<button class="btn primary sm" data-action="ready"><span>It’s in the start zone — let’s play</span>${RG.btnHint("confirm")}</button>` : ""}
       ${RG.hint("undo", "Undo last shot")}${RG.hint("menu", "Pause")}
     </div>
     <div class="pill" style="position:absolute;right:0;top:230px;pointer-events:auto">
-      ${dot(a ? a.color : "#fff", 10)}${motion.moving ? "Ball moving" : motion.hidden ? "Ball stopped, hidden · position estimated" : motion.dist_to_cup != null ? `Ball stopped · ${motion.dist_to_cup} m from cup` : "Ball stopped"}
+      ${dot(a ? a.color : "#fff", 10)}<span data-play-pill>${esc(playPill(ui, motion))}</span>
     </div>
   </div>`;
 };
+
+function playStatus(ui, a, strokes) {
+  const motion = (ui && ui.motion) || {};
+  if (!a) return "";
+  if (motion.moving) return "Ball rolling…";
+  if (motion.hidden) return "Stopped, hidden — position estimated";
+  if (ui && ui.awaiting_tee) {
+    if (ui.in_start) return "In the start zone. Putt when ready, or confirm.";
+    if (ui.ball_seen) return "Move it into the start circle, click it on the camera, or confirm when ready.";
+    return "I don’t see your ball yet — click it on the camera, or confirm when it’s ready.";
+  }
+  return strokes === 0 ? "Ready. Putt when ready." : "Ball stopped. Putt when ready.";
+}
+
+function playPill(ui, motion) {
+  if (ui && ui.awaiting_tee) {
+    if (ui.in_start) return "In start zone · waiting for putt";
+    if (ui.ball_seen) return "Ball seen · not in the start circle yet";
+    return "Looking for your ball";
+  }
+  if (motion.moving) return "Ball moving";
+  if (motion.hidden) return "Ball stopped, hidden · position estimated";
+  if (motion.dist_to_cup != null) return `Ball stopped · ${motion.dist_to_cup} m from cup`;
+  return "Ball stopped";
+}
 
 S.S12 = function (st) {
   const p = st.ui.player || {};

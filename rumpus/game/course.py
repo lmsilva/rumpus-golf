@@ -12,9 +12,15 @@ from typing import Any
 from ..paths import DATA_DIR
 
 
+_COURSES_CACHE: list[dict[str, Any]] | None = None
+
+
 def load_courses() -> list[dict[str, Any]]:
-    raw = json.loads((DATA_DIR / "courses.json").read_text(encoding="utf-8"))
-    return raw.get("courses", [])
+    global _COURSES_CACHE
+    if _COURSES_CACHE is None:
+        raw = json.loads((DATA_DIR / "courses.json").read_text(encoding="utf-8"))
+        _COURSES_CACHE = raw.get("courses", [])
+    return _COURSES_CACHE
 
 
 def course_by_id(course_id: str) -> dict[str, Any] | None:
@@ -36,8 +42,8 @@ class CourseLayout:
 
     def __init__(self, course: dict[str, Any], play_area: list[tuple[float, float]]):
         self.course = course
-        self.play_area = play_area
-        self.min_x, self.min_y, self.max_x, self.max_y = play_area_bbox(play_area)
+        self.play_area = play_area or [(-1.5, -1.0), (1.5, -1.0), (1.5, 1.0), (-1.5, 1.0)]
+        self.min_x, self.min_y, self.max_x, self.max_y = play_area_bbox(self.play_area)
         self.width = self.max_x - self.min_x
         self.height = self.max_y - self.min_y
 
