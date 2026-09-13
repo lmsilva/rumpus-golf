@@ -12,6 +12,9 @@ function topbar(subtitle, opts = {}) {
   if (opts.browse) {
     right.push(`<span class="hint">${RG.glyph("prev")}${RG.glyph("next")}<span>Browse</span></span>`);
   }
+  if (opts.menu) {
+    right.push(`<button type="button" class="hint back-btn" data-action="menu">${RG.glyph("menu")}<span>Pause</span></button>`);
+  }
   if (opts.back !== false) {
     right.push(`<button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button>`);
   }
@@ -139,6 +142,7 @@ S.S03 = function (st) {
   <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
     <button class="btn primary" data-action="confirm" style="min-width:400px"><span>Looks right</span>${RG.btnHint("confirm")}</button>
     <button class="btn glass" data-action="recalibrate" style="min-width:400px"><span>Recalibrate</span>${RG.btnHint("undo")}</button>
+    <button class="btn glass" data-action="back"><span>Back</span>${RG.btnHint("back")}</button>
   </div>`;
 };
 
@@ -148,7 +152,7 @@ S.S04 = function (st) {
     ? "Averages 2 s of depth frames, then fits the floor plane. A mint progress line runs along the top of the feed."
     : "Captures a color reference of the empty floor. A mint progress line runs along the top of the feed.";
   return `
-  ${topbar("", { rail: stepRail(1), back: false })}
+  ${topbar("", { rail: stepRail(1) })}
   <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
     <div class="feed-slot" data-feed-slot style="border-radius:24px">
       <div class="feed-band" style="top:0;height:21.3%"></div>
@@ -175,28 +179,42 @@ S.S04 = function (st) {
 
 S.S05 = function (st) {
   const cur = (st.ui && st.ui.preset) || "medium";
+  const colorOnly = !!(st.ui && st.ui.color_only);
+  const corners = (st.ui && st.ui.corners) || 0;
+  const w = (st.ui && st.ui.area_w) || 3;
+  const h = (st.ui && st.ui.area_h) || 2;
   const presets = [
     ["small", "Small", "2 × 1.5 m"],
     ["medium", "Medium", "3 × 2 m"],
     ["large", "Large", "4 × 2.5 m"],
   ];
+  const body = colorOnly
+    ? "This camera cannot measure distance. Click the four corners of a rectangle on the floor whose real size you know — tape, a rug, or the walls of the course."
+    : "Click four or more corners on the floor. Balls stopping outside are out of bounds.";
+  const sizeKicker = colorOnly ? "How big is that rectangle?" : "Start from a preset";
+  const sizeHelp = colorOnly
+    ? `The webcam only sees pixels. ${w} × ${h} m is the real size of the rectangle you marked — that’s what turns those four corners into meters.`
+    : "Drops a rectangle of that size on the floor. Drag the corners to fit what you have.";
+  const confirmDisabled = colorOnly && corners < 4;
   return `
-  ${topbar("", { rail: stepRail(2), back: false })}
+  ${topbar("", { rail: stepRail(2) })}
   <div style="display:grid;grid-template-columns:1fr 520px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
     <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
       ${livePill(st, true)}
-      <div class="hints">${RG.hint("stick", "Move corner")}${RG.hint("confirm", "Place")}${RG.hint("undo", "Undo corner")}${RG.hint("secondary", "Close shape")}</div>
+      <div class="hints">${RG.hint("stick", "Move corner")}${RG.hint("confirm", "Place")}${RG.hint("undo", "Undo corner")}${colorOnly ? "" : RG.hint("secondary", "Close shape")}</div>
     </div>
     <div class="card" style="padding:44px;display:flex;flex-direction:column">
       <div class="kicker mint">Step 2 of 5</div>
       <h2 style="font-size:56px;margin:14px 0 20px">Mark the course edge.</h2>
-      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-bottom:28px">Click four or more corners on the floor. Balls stopping outside are out of bounds.</div>
-      <div class="kicker" style="margin-bottom:10px">Start from a preset</div>
+      <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-bottom:28px">${body}</div>
+      <div class="kicker" style="margin-bottom:10px">${sizeKicker}</div>
       <div class="seg presets">
         ${presets.map(([id, name, sub]) => `<button type="button" class="opt ${id === cur ? "sel" : ""}" data-set-preset="${id}">${name}<span class="sub">${sub}</span></button>`).join("")}
       </div>
+      <div data-size-help style="font:400 16px/1.45 var(--font-body);color:var(--text-muted);margin-top:12px">${sizeHelp}</div>
+      <div data-corner-progress style="font:600 16px var(--font-body);color:var(--mint);margin-top:10px">${colorOnly ? `${corners} of 4 corners` : ""}</div>
       <div style="margin-top:auto;display:flex;flex-direction:column;gap:12px">
-        <button class="btn primary stretch" data-action="confirm"><span>Use this area</span>${RG.btnHint("confirm")}</button>
+        <button class="btn primary stretch" data-action="confirm"${confirmDisabled ? " disabled" : ""}><span>Use this area</span>${RG.btnHint("confirm")}</button>
         <button class="btn secondary stretch quiet" data-action="clear"><span>Clear corners</span>${RG.btnHint("undo")}</button>
       </div>
     </div>
@@ -208,40 +226,37 @@ S.S06 = function (st) {
   const cur = st.game && st.game.course_id;
   return `
   ${photo("s06", "saturate(.8)", "linear-gradient(180deg,rgba(var(--ground-rgb),.4) 0%,rgba(var(--ground-rgb),.92) 60%)", { opacity: 0.28 })}
-  ${topbar("Step 3 of 5 · Course", { back: false, browse: true })}
+  ${topbar("Step 3 of 5 · Course", { browse: true })}
   <div style="position:relative;padding:40px 56px 48px;display:flex;flex-direction:column;gap:20px;height:calc(100% - 96px)">
     <div><h2 style="font-size:60px">Pick a course for hole 1.</h2>
     <div style="font:400 21px/1.45 var(--font-body);color:var(--text-muted);margin-top:8px">Drawn for your ${(st.ui && st.ui.area_w) || "3.0"} × ${(st.ui && st.ui.area_h) || "2.0"} m area. You’ll place the real objects next and can nudge anything.</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;flex:1">
       ${courses.map((c, i) => {
         const sel = c.id === cur;
-        return `<div class="card" data-action="select" data-index="${i}" tabindex="0" role="button" style="text-align:left;cursor:pointer;${sel ? "background:var(--invert);color:var(--invert-text);border:2px solid var(--invert)" : "border:2px solid transparent"}">
+        return `<div class="card course-card${sel ? " is-selected" : ""}" data-action="select" data-index="${i}" tabindex="0" role="button">
           <div class="row" style="justify-content:space-between">
             <div><div class="kicker" style="opacity:.7">${esc(c.level)}</div>
             <div style="font:800 40px/1 var(--font-display);letter-spacing:-.02em;margin-top:6px">${esc(c.name)}</div></div>
-            <span class="pill" style="${sel ? "background:var(--invert-text);color:var(--invert)" : ""}">Par ${c.par}</span>
+            <span class="pill course-par">Par ${c.par}</span>
           </div>
-          <div style="margin:16px 0;aspect-ratio:3/2;border-radius:16px;background:${sel ? "#e3e0d8" : "#15171c"};position:relative;overflow:hidden">
-            ${courseMap(c, sel)}
-          </div>
+          <div class="course-map">${courseMap(c)}</div>
           <div style="font:400 18px/1.4 var(--font-body);opacity:.8">${esc(c.blurb)}</div>
           <div class="kicker" style="margin-top:14px">You will need</div>
           <div style="font:400 17px/1.4 var(--font-body);margin-top:6px">${c.needs.map(esc).join(" · ")}</div>
-          <div class="row" style="margin-top:16px"><button class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${sel ? "Selected" : "Choose"}</span>${RG.btnHint("confirm")}</button></div>
+          <div class="row" style="margin-top:16px"><button type="button" class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${sel ? "Use this course" : "Choose"}</span>${RG.btnHint("confirm")}</button></div>
         </div>`;
       }).join("")}
     </div>
   </div>`;
 };
 
-function courseMap(c, sel) {
-  const fg = sel ? "#15171c" : "#f2efe8";
+function courseMap(c) {
   const obs = c.obstacles || [];
-  let s = `<span style="position:absolute;left:${c.start.x}%;top:${c.start.y}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border:2px solid ${fg};border-radius:50%"></span>`;
+  let s = `<span style="position:absolute;left:${c.start.x}%;top:${c.start.y}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border:2px solid #f2efe8;border-radius:50%"></span>`;
   s += `<span style="position:absolute;left:${c.hole.x}%;top:${c.hole.y}%;width:7%;aspect-ratio:1;transform:translate(-50%,-50%);background:var(--mint);border-radius:50%"></span>`;
   for (const o of obs) {
     const fill = o.kind === "hazard" ? "repeating-linear-gradient(45deg,#ff6b57 0 4px,#b9483a 4px 8px)"
-      : o.kind === "book" ? "#f2efe8" : o.kind === "tube" ? "#c9c4b8" : "#6b7280";
+      : o.kind === "book" ? "#f2efe8" : o.kind === "tube" ? "#c9c4b8" : "#8a8f99";
     s += `<span style="position:absolute;left:${o.x}%;top:${o.y}%;width:${o.w}%;height:${o.h}%;background:${fill};border-radius:2px"></span>`;
   }
   return s;
@@ -251,26 +266,36 @@ S.S07 = function (st) {
   const ui = st.ui || {};
   const course = ui.course || {};
   const ghosts = ui.ghosts || [];
+  const sel = ui.selected;
   const rebuilding = st.state === "HOLE_START";
   return `
-  <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:480px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
-    <div class="kicker">${esc(course.level || "")} · Par ${course.par || ""}</div>
-    <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">${rebuilding ? `Rebuild hole ${st.game.hole}.` : `Build “${esc(course.name || "")}”.`}</h2>
-    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Put each object roughly inside its ghost — the ticks are a hint. When everything is down, scan: the app measures what’s really on the floor and you confirm it.</div>
-    <div class="col" style="margin-top:20px;gap:8px;overflow:auto">
-      ${ghosts.map((g) => `<div class="row" style="background:rgba(242,239,232,.05);border-radius:14px;padding:14px 16px">
-        <span style="width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;${g.seen ? "background:var(--mint);color:var(--mint-text);font:700 18px var(--font-display)" : "border:1px solid rgba(242,239,232,.3)"}">${g.seen ? "✓" : ""}</span>
-        <div style="flex:1"><div style="font:700 19px var(--font-display)">${esc(g.label)}</div><div style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(g.item)}</div></div>
-        <span style="font:600 14px var(--font-body);color:var(--text-muted)">~${(g.real_size_cm || []).join(" × ")} cm</span>
-      </div>`).join("")}
+  ${topbar("", { rail: rebuilding ? "" : stepRail(3), back: !rebuilding, menu: rebuilding })}
+  <div style="display:grid;grid-template-columns:1fr 480px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
+    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
+      ${livePill(st, true)}
+      <div class="hints">${RG.hint("stick", "Move / corner")}${RG.hint("undo", "Rotate 90°")}${RG.hint("secondary", "Reset")}${RG.hint("next", "Next object")}</div>
     </div>
-    <div class="col" style="margin-top:auto;gap:10px">
-      <button class="btn primary" data-action="confirm"><span>Scan obstacles</span>${RG.btnHint("confirm")}</button>
-      <button class="btn secondary" data-action="prev"><span>Swap course</span>${RG.btnHint("prev")}</button>
+    <div class="card" style="padding:36px;display:flex;flex-direction:column">
+      <div class="kicker">${esc(course.level || "")} · Par ${course.par || ""}</div>
+      <h2 style="font-size:48px;line-height:1;margin:8px 0 10px">${rebuilding ? `Rebuild hole ${st.game.hole}.` : `Build “${esc(course.name || "")}”.`}</h2>
+      <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">The dashed boxes are where this course wants each object. Put the real items on the floor, then drag the outline and its corners until they sit on what the camera sees.</div>
+      <div class="col" style="margin-top:20px;gap:8px;overflow:auto">
+        ${ghosts.map((g, i) => `<div class="row" data-action="select" data-index="${i}" tabindex="0" role="button" style="cursor:pointer;background:${i === sel ? "rgba(139,233,195,.16)" : "rgba(242,239,232,.05)"};border:${i === sel ? "1px solid var(--mint)" : "1px solid transparent"};border-radius:14px;padding:14px 16px">
+          <span style="width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;border:1px solid ${i === sel ? "var(--mint)" : "rgba(242,239,232,.3)"};font:700 14px var(--font-display)">${i + 1}</span>
+          <div style="flex:1"><div style="font:700 19px var(--font-display)">${esc(g.label)}</div><div style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(g.item)}</div></div>
+          <span style="font:600 14px var(--font-body);color:var(--text-muted)">${(g.real_size_cm || []).length ? `~${(g.real_size_cm || []).join(" × ")} cm` : "custom"}</span>
+        </div>`).join("")}
+      </div>
+      <div class="col" style="margin-top:auto;gap:10px">
+        <button class="btn primary stretch" data-action="confirm"><span>Outlines match</span>${RG.btnHint("confirm")}</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button class="btn secondary" data-action="draw"><span>Add outline</span></button>
+          <button class="btn secondary" data-action="delete"><span>Remove</span></button>
+        </div>
+        <button class="btn secondary stretch quiet" data-action="prev"><span>Swap course</span>${RG.btnHint("prev")}</button>
+      </div>
     </div>
-  </div>
-  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted" style="font:400 17px var(--font-body)">Step 3 of 5 · ${esc(course.name || "")}</span></div>
-  <div class="hints">${RG.hint("stick", "Move")}${RG.hint("confirm", "Grab / drop")}${RG.hint("undo", "Rotate 90°")}${RG.hint("secondary", "Reset")}${RG.hint("next", "Next object")}</div>`;
+  </div>`;
 };
 
 S["S07b"] = function (st) {
@@ -297,7 +322,7 @@ S["S07b"] = function (st) {
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Low-confidence outlines must be confirmed or deleted before Confirm all.</div>
     </div>
   </div>
-  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span></div>
+  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3;display:flex;align-items:center;gap:16px"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span><button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></div>
   <div class="pill" style="position:absolute;left:56px;top:150px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Scanned 1.5 s of depth · dashed = proposed, not yet on the course</div>
   <div class="hints">${RG.hint("stick", "Move cursor")}${RG.hint("confirm", "Select object")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Draw one")}${RG.hint("prev", "Undo")}</div>`;
 };
@@ -310,7 +335,7 @@ S["S07c"] = function (st) {
   const statusLabel = { proposed: "Pending", confirmed: "Confirmed", selected: "Selected", deleted: "Deleted", drawing: "Drawing" };
   const selected = sel != null ? obs[sel] : null;
   return `
-  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span></div>
+  <div class="glass" style="position:absolute;left:56px;top:56px;padding:16px 24px;border-radius:16px;z-index:3;display:flex;align-items:center;gap:16px"><span class="brand" style="font:700 22px var(--font-display)">Rumpus Golf</span> <span class="text-muted">Step 3 of 5 · Obstacles</span><button type="button" class="hint back-btn" data-action="back">${RG.glyph("back")}<span>Back</span></button></div>
   <div class="legend">
     <span class="pill">${`<span class="swatch" style="background:var(--mint)"></span>`} Selected</span>
     <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
@@ -342,42 +367,54 @@ S["S07c"] = function (st) {
 };
 
 S.S08 = function (st) {
-  const searching = st.ui.searching;
   return `
-  <div class="glass" style="position:absolute;left:56px;top:56px;max-width:800px;border-radius:24px;padding:32px 40px;z-index:3">
-    <div class="kicker mint">Step 4 of 5 · Cup</div>
-    <h2 style="font-size:60px;line-height:1;margin:10px 0 14px">${searching ? "Place the putting cup inside the play area." : "Found the cup."}</h2>
-    ${searching ? `<div style="height:4px;background:var(--fill-quiet);border-radius:999px;overflow:hidden;margin-top:16px"><div style="height:100%;width:40%;background:var(--mint);animation:rg-slide 1.5s linear infinite"></div></div>` : `<div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft);margin-top:14px">Averaged 1.5 s of depth and matched the white ring. Is the mint point on the opening? Drag the circle, or the dot to resize.</div>`}
-  </div>
-  <div class="row" style="position:absolute;left:56px;bottom:48px;gap:14px;z-index:3">
-    <button class="btn primary" data-action="confirm"><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
-    <button class="btn glass" data-action="redetect"><span>Detect again</span>${RG.btnHint("undo")}</button>
-    <button class="btn glass" data-action="draw"><span>Draw it myself</span>${RG.btnHint("secondary")}</button>
-  </div>
-  <style>@keyframes rg-slide{from{transform:translateX(-100%)}to{transform:translateX(250%)}}</style>`;
+  ${topbar("", { rail: stepRail(4) })}
+  <div style="display:grid;grid-template-columns:1fr 480px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
+    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
+      ${livePill(st, true)}
+      <div class="hints">${RG.hint("stick", "Move cup")}${RG.hint("undo", "Reset")}${RG.hint("secondary", "Click to place")}</div>
+    </div>
+    <div class="card" style="padding:36px;display:flex;flex-direction:column">
+      <div class="kicker mint">Step 4 of 5 · Cup</div>
+      <h2 style="font-size:48px;line-height:1;margin:8px 0 12px">Mark the hole.</h2>
+      <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">The mint circle starts where this course suggests the cup. Put the real cup on the floor, then drag the circle onto it. Drag the mint dot on the edge to resize.</div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:10px">
+        <button class="btn primary stretch" data-action="confirm"><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
+        <button class="btn secondary stretch" data-action="draw"><span>Click to place</span>${RG.btnHint("secondary")}</button>
+        <button class="btn secondary stretch quiet" data-action="redetect"><span>Reset to suggested</span>${RG.btnHint("undo")}</button>
+      </div>
+    </div>
+  </div>`;
 };
 
 S.S09 = function (st) {
   const balls = st.ui.balls || [];
   const players = st.ui.players || [];
+  const rejected = st.ui.rejected || 0;
+  const sel = st.ui.selected;
   return `
-  <div style="position:absolute;left:56px;top:56px;z-index:3"><h2 style="font:800 48px var(--font-display)">Put every ball on the floor.</h2></div>
-  <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:640px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
-    <div class="kicker">${balls.length} balls found · ${(st.ui.rejected || 0)} rejected</div>
+  ${topbar("", { rail: stepRail(5) })}
+  <div style="position:absolute;left:56px;top:120px;z-index:3"><h2 style="font:800 48px var(--font-display)">Put every ball on the floor.</h2></div>
+  <div class="glass-strong" style="position:absolute;right:40px;top:120px;bottom:56px;width:640px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
+    <div class="kicker">${balls.length} ball${balls.length === 1 ? "" : "s"} found · ${rejected} rejected</div>
     <h2 style="font-size:48px;margin:8px 0 10px">Who’s who?</h2>
-    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">Type a name next to each ball. Order here is tee-off order; drag rows to reorder. Tap a swatch to re-sample if lighting changed.</div>
+    <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">One player per color. Numbers on the course match this tee-off list. Click a row to point at that ball. Remove a row if auto-detect was wrong.</div>
     <div class="col" style="margin-top:20px;gap:10px;overflow:auto">
-      ${players.map((p, i) => `<div class="row" style="background:rgba(242,239,232,.05);border-radius:16px;padding:10px 12px 10px 16px">
-        <span style="width:20px;font:700 16px var(--font-display);color:var(--text-muted)">${i + 1}</span>
-        ${dot(p.color, 48)}
-        <input class="player-name" data-text="player_name" data-index="${i}" value="${esc(p.name)}" style="background:#15171c;color:#f2efe8;border:1px solid var(--line-strong);border-radius:12px;padding:12px 16px;font:700 22px var(--font-display);flex:1;min-width:0">
-        <span style="font:400 14px var(--font-body);color:var(--text-muted)">${esc(p.hue_name)}</span>
-        <span style="color:var(--text-muted);letter-spacing:.12em">⋮⋮</span>
+      ${players.map((p, i) => `<div class="row player-row${i === sel ? " is-selected" : ""}" data-action="select" data-index="${i}" tabindex="0" role="button">
+        <span class="player-ord">${i + 1}</span>
+        ${dot(p.color, 40)}
+        <input class="player-name" data-text="player_name" data-index="${i}" value="${esc(p.name)}" placeholder="Player name">
+        <span class="player-hue">${esc(p.hue_name)}</span>
+        <div class="player-tools" onclick="event.stopPropagation()">
+          <button type="button" class="icon-btn" data-action="move_up" data-index="${i}" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+          <button type="button" class="icon-btn" data-action="move_down" data-index="${i}" ${i === players.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+          <button type="button" class="icon-btn danger" data-action="delete" data-index="${i}" aria-label="Remove player">×</button>
+        </div>
       </div>`).join("")}
-      <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">Room for ${Math.max(0, 6 - players.length)} more ball${players.length === 5 ? "" : "s"} — max 6 players.</div>
+      <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">${players.length ? `Room for ${Math.max(0, 6 - players.length)} more colors — click another ball on the camera.` : "No balls yet — click each ball on the camera to add a player."}</div>
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
-      <button class="btn primary stretch" data-action="confirm"><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
+      <button class="btn primary stretch" data-action="confirm"${players.length ? "" : " disabled"}><span>Save setup & continue</span>${RG.btnHint("confirm")}</button>
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Writes rumpus-setup.json: floor plane, play area, course template, hole zone, ball hues, names.</div>
     </div>
   </div>`;
@@ -408,7 +445,10 @@ S.S10 = function (st) {
           <button type="button" class="stepper" data-set-cap="${cap + 1}">+</button>
         </div>
       </div>
-      <div style="margin-top:auto"><button class="btn primary lg" data-action="confirm"><span>Tee off</span>${RG.btnHint("confirm")}</button></div>
+      <div class="row" style="margin-top:auto;gap:14px;align-items:center">
+        <button class="btn primary lg" data-action="confirm"><span>Tee off</span>${RG.btnHint("confirm")}</button>
+        ${RG.hint("menu", "Pause")}
+      </div>
     </div>
     <div class="col" style="gap:12px">
       <div class="kicker">Tee-off order · ${players.length} players</div>
@@ -432,7 +472,7 @@ S.S11 = function (st) {
   const activeStrokes = a ? (scores[a.id] || [])[st.game.hole - 1] || 0 : 0;
   const status = !a ? "" : motion.moving ? "Ball rolling…" : motion.hidden ? "Stopped, hidden — position estimated" : activeStrokes === 0 ? "Place your ball in the start zone" : "Ball stopped. Putt when ready.";
   return `
-  <div style="position:absolute;inset:40px;z-index:3;pointer-events:none;display:flex;flex-direction:column">
+  <div style="position:absolute;inset:40px;z-index:6;pointer-events:none;display:flex;flex-direction:column">
     <div class="row" style="gap:16px;align-items:stretch">
       ${a ? `<div style="background:${a.color};color:var(--player-text);border-radius:24px;padding:26px 40px;box-shadow:var(--shadow-card);display:flex;align-items:center;gap:36px">
         <div><div class="kicker" style="opacity:.7;color:var(--player-text)">Your turn</div><div style="font:800 76px/1.15 var(--font-display);overflow:hidden">${marquee(a.name)}</div></div>
@@ -470,6 +510,7 @@ S.S12 = function (st) {
     <div class="kicker" style="color:var(--player-text);opacity:.65">Next up</div>
     <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name)}</div>
     <div style="font:600 32px/1.3 var(--font-body);opacity:.8">${stroke === 0 ? `Place the ${esc(p.hue_name || "")} ball in the start zone` : `Play the ${esc(p.hue_name || "")} ball where it lies · stroke ${stroke}`}</div>
+    <div style="margin-top:28px">${RG.hint("confirm", "Skip")}</div>
   </div>`;
 };
 
@@ -485,7 +526,10 @@ S.S13 = function (st) {
     <div><div style="font:800 64px/1.05 var(--font-display)">${esc(p.name)} holed in ${n}.</div>
     <div style="font:600 30px var(--font-body);opacity:.7">${sub} · Par ${par}</div></div>
   </div>
-  <div style="position:absolute;left:56px;bottom:48px;z-index:5">${RG.hint("undo", "Wrong call? Undo within 5 s — the ball goes back in play at the cup.")}</div>`;
+  <div class="row" style="position:absolute;left:56px;bottom:48px;gap:12px;z-index:5">
+    ${RG.hint("undo", "Wrong call? Undo within 5 s")}
+    <button class="btn primary sm" data-action="confirm"><span>Continue</span>${RG.btnHint("confirm")}</button>
+  </div>`;
 };
 
 S.S14 = function (st) {
@@ -511,6 +555,7 @@ S.S14 = function (st) {
 S.S15 = function (st) {
   const ui = st.ui || {};
   const focus = ui.focus || 0;
+  const flyout = !!(ui.recal_flyout || focus === 3);
   const rows = [
     ["Resume", "resume", "back"],
     ["Undo last shot", "undo", "undo"],
@@ -520,8 +565,36 @@ S.S15 = function (st) {
     ["Music & sound", "music", "confirm"],
     ["Quit to start", "quit", "confirm"],
   ];
+  const recal = [
+    ["Re-detect cup", "Someone kicked it. Re-runs the cup step only.", "cup"],
+    ["Re-assign balls", "Lighting changed or balls swapped.", "balls"],
+    ["Redraw play area", "Rug moved or you want a bigger course.", "area"],
+    ["Edit obstacles", "Delete or reshape the outlines on the floor.", "obstacles"],
+    ["Redo floor snapshot", "Camera or tripod moved. Wizard keeps current values as hints.", "floor"],
+    ["Verify only", "Show all zones over the feed and confirm.", "verify"],
+  ];
   const active = ui.active || {};
   const scores = ui.scores || {};
+  const scoreCard = `
+  <div class="glass" style="position:absolute;right:40px;top:40px;width:520px;border-radius:24px;padding:28px 32px;z-index:3">
+    <div class="kicker">Hole ${ui.hole} of 3 · Par 3</div>
+    <div style="font:800 34px/1 var(--font-display);margin:4px 0 14px">${esc(st.game && st.game.course ? st.game.course.name : "")}</div>
+    ${((st.game && st.game.players) || []).map((p) => `<div class="row" style="padding:6px 0">
+      ${dot(p.color, 16)}<span style="font:700 22px/1.25 var(--font-display);flex:1">${esc(p.name)}</span>
+      <span style="font:800 26px var(--font-display)">${(scores[p.id] || [])[ui.hole - 1] || 0}</span>
+    </div>`).join("")}
+  </div>`;
+  const flyoutCard = `
+  <div class="recal-flyout" style="position:absolute;left:744px;top:40px;bottom:40px;width:900px;padding:48px 24px;z-index:3;display:flex;flex-direction:column;box-sizing:border-box">
+    <div class="kicker mint" style="margin-top:236px">Recalibrate — pick only what moved</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">
+      ${recal.map(([title, body, kind]) => `<button type="button" class="glass recal-card" data-action="recal_${kind}">
+        <div style="font:700 26px var(--font-display)">${esc(title)}</div>
+        <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted);margin-top:6px">${esc(body)}</div>
+      </button>`).join("")}
+    </div>
+    <div style="margin-top:auto;font:400 15px var(--font-body);color:var(--text-muted)">Opens that setup screen with current values. Back returns here with the game intact.</div>
+  </div>`;
   return `
   ${photo("s15", "saturate(.75) brightness(.7)", "linear-gradient(90deg,rgba(var(--ground-rgb),.55) 0%,rgba(var(--ground-rgb),.2) 45%,rgba(var(--ground-rgb),.75) 100%)")}
   <div class="glass-strong" style="position:absolute;left:40px;top:40px;bottom:40px;width:680px;border-radius:28px;padding:48px;z-index:3;display:flex;flex-direction:column">
@@ -532,16 +605,9 @@ S.S15 = function (st) {
         <span style="flex:1">${esc(label)}</span>${RG.glyph(verb)}
       </button>`).join("")}
     </div>
-    <div style="margin-top:auto;font:400 15px var(--font-body);color:var(--text-muted)">Music ducks to 30% while paused.</div>
+    <div style="margin-top:auto;font:400 15px var(--font-body);color:var(--text-muted)">${flyout ? "Recalibrate opens the setup screens with current values pre-filled; Back returns here with the game intact." : "Music ducks to 30% while paused."}</div>
   </div>
-  <div class="glass" style="position:absolute;right:40px;top:40px;width:520px;border-radius:24px;padding:28px 32px;z-index:3">
-    <div class="kicker">Hole ${ui.hole} of 3 · Par 3</div>
-    <div style="font:800 34px/1 var(--font-display);margin:4px 0 14px">${esc(st.game && st.game.course ? st.game.course.name : "")}</div>
-    ${(st.game.players || []).map((p) => `<div class="row" style="padding:6px 0">
-      ${dot(p.color, 16)}<span style="font:700 22px/1.25 var(--font-display);flex:1">${esc(p.name)}</span>
-      <span style="font:800 26px var(--font-display)">${(scores[p.id] || [])[ui.hole - 1] || 0}</span>
-    </div>`).join("")}
-  </div>
+  ${flyout ? flyoutCard : scoreCard}
   <div class="pill" style="position:absolute;right:40px;bottom:40px;z-index:3"><span class="dot" style="background:var(--mint)"></span>Lobby Time — Kevin MacLeod · ducked to 30%</div>`;
 };
 

@@ -27,7 +27,7 @@ from .models import (CircleZone, EventType, FloorPlane, Obstacle, Palette, Playe
 from .sensor.base import SensorBackend
 from .sensor.mock import MockBackend, hex_to_bgr
 from .setup_data import Setup
-from .vision.ball_tracker import BallTracker
+from .vision.ball_tracker import BallTracker, classify_ball_swatch, detect_setup_balls
 from .vision.floor import fit_floor_plane
 from .vision.geometry import (CameraModel, FloorMapper, HomographyMapper,
                               default_camera, homography_from_corners)
@@ -72,6 +72,12 @@ SCREEN_BY_STATE = {
 
 FEED_STATES = {S.VERIFY, S.CAL_FLOOR, S.CAL_AREA, S.CAL_PLACE, S.CAL_OBSTACLES,
                S.CAL_CUP, S.CAL_BALLS, S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB, S.HOLE_START}
+
+# Esc / Menu opens pause so the player can quit or recalibrate.
+IN_GAME_STATES = {
+    S.GAME_START, S.HOLE_START, S.PLAY, S.TURN_CHANGE,
+    S.HOLE_OUT, S.OOB, S.HOLE_COMPLETE,
+}
 
 HUE_NAMES = Palette.HUE_NAMES
 PLAYER_COLORS = Palette.PLAYER_COLORS
@@ -142,7 +148,11 @@ class GameEngine:
         self._draw_circle_center: tuple[float, float] | None = None
         self._draw_circle_r = 0.0
         self._selected_obstacle: int | None = None
-        self._dragging: tuple | None = None  # ("poly", idx) | ("circle", "center"|"radius") | ("obstacle", idx, corner)
+        self._selected_ghost: int | None = None
+        self._place_ghosts: list[dict] = []
+        self._place_ghosts_course: str | None = None
+        self._drag_anchor: tuple[float, float] | None = None
+        self._dragging: tuple | None = None  # ("poly", idx) | ("area", idx) | ("ghost", idx) | ("circle", ...)
 
         # Putt animation (mock).
         self._putt: dict | None = None
@@ -164,9 +174,16 @@ class GameEngine:
         self._settings_return: str = S.BOOT
         self._settings_tab = "display"     # display | rules | players | camera | about
         self._verify_return: str = S.SENSOR_CHECK  # where Escape returns from Verify
+        self._course_return: str | None = None     # Course library opened from Boot
         self._pause_focus = 0
         self._recal_flyout = False
+        self._recal_return: str | None = None
+        self._recal_single = False
         self._rebuilding = False
+        self._last_ball_scan = 0.0
+        self._rejected_balls: set[str] = set()
+        self._dismissed_hues: set[str] = set()
+        self._selected_setup_player: int | None = None
 
         self._last_t = time.time()
 
@@ -297,12 +314,17 @@ class GameEngine:
             # Color-only: capture reference/live color, track balls by hue.
             if now < self._capture_until:
                 self._accumulate_color(self._frame_color)
+            if self.state == S.CAL_BALLS:
+                self._maybe_scan_setup_balls(now)
             if self.state in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
                 if self.mapper is not None:
                     self.tracker.update(self._frame_color, None, self.mapper,
-                                        self.cam, self.plane, self._confirmed_obstacles(), now)
+                                        self.cam, self.plane, self._confirmed_obstacles(), now,
+                                        play_area=self.setup.play_area)
                     self._apply_ball_motion(now)
             return
+        if self.state == S.CAL_BALLS:
+            self._maybe_scan_setup_balls(now)
         if self._frame_depth is None:
             return
         # Accumulate depth while a capture is active.
@@ -313,7 +335,8 @@ class GameEngine:
             if self.mapper is not None and self.plane is not None:
                 obs = self._confirmed_obstacles()
                 self.tracker.update(self._frame_color, self._frame_depth, self.mapper,
-                                    self.cam, self.plane, obs, now)
+                                    self.cam, self.plane, obs, now,
+                                    play_area=self.setup.play_area)
                 self._apply_ball_motion(now)
 
     # ===================================================================== #
@@ -324,6 +347,8 @@ class GameEngine:
         self._capture_label = label
         self._avg_depth = None
         self._avg_count = None
+        self._avg_color = None
+        self._avg_color_count = 0.0
 
     def _accumulate_depth(self, depth: np.ndarray) -> None:
         d = depth.astype(np.float32)
@@ -372,15 +397,26 @@ class GameEngine:
         return time.time() < self._capture_until
 
     def _process_timers(self, now: float) -> None:
+        if self.state == S.PAUSE:
+            return
         # Timed capture completions.
         if self._capture_until and now >= self._capture_until:
-            self._on_capture_done()
+            label = self._capture_label
+            try:
+                self._on_capture_done()
+            except Exception:
+                self._capture_until = 0.0
+                if label == "obstacles":
+                    self._set_state(S.CAL_OBSTACLES)
 
         # Turn-change / hole-out auto-transition.
         if self._transition_next is not None and now >= self._transition_until:
             nxt = self._transition_next
             self._transition_next = None
-            self._set_state(nxt)
+            if nxt == "__advance_turn__":
+                self._advance_turn()
+            elif nxt in SCREEN_BY_STATE:
+                self._set_state(nxt)
 
     # ===================================================================== #
     # State transitions (explicit)
@@ -396,15 +432,25 @@ class GameEngine:
             self._apply_preset("medium")
         elif state == S.CAL_COURSE and not self.layout:
             self.layout = CourseLayout(course_by_id(self.current_course_id), self.setup.play_area)
+        elif state in (S.CAL_PLACE, S.HOLE_START):
+            self._capture_until = 0.0
+            self._capture_label = ""
+            self._init_place_ghosts()
+            if self.layout is not None:
+                s = self.layout.start
+                self.setup.start = CircleZone(s["x"], s["y"], s.get("r", 0.15))
         elif state == S.CAL_CUP:
-            # Mock: seed a physical cup at the template hole so it is detectable.
-            if self.is_mock and self.setup.hole is None and self.layout is not None:
-                self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], 0.045)
-            self._start_capture(1.5, "cup")
+            self._capture_until = 0.0
+            self._capture_label = ""
+            self._dragging = None
+            self._ensure_cup()
         elif state == S.CAL_BALLS:
-            self._ensure_mock_balls(2)
-            self._derive_players_from_balls()
+            self._last_ball_scan = 0.0
+            if self.is_mock:
+                self._ensure_mock_balls(max(2, len(self.players) or 2))
+                self._derive_players_from_balls()
         elif state == S.PLAY:
+            self._transition_next = None
             self._transition_until = 0.0
 
     # ===================================================================== #
@@ -425,18 +471,16 @@ class GameEngine:
         st = self.state
         if action == "back":
             # Esc during play pauses (per INPUT.md: "Pause | Esc").
-            if st in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
-                self._prev_state_for_pause = st
-                self._pause_focus = 0
-                self._set_state(S.PAUSE)
+            if st in IN_GAME_STATES:
+                self._enter_pause()
+            elif st == S.PAUSE and (self._recal_flyout or self._pause_focus == 3):
+                self._pause_set_focus(0)
             else:
                 self._on_back()
             return
         if action == "menu":
-            if st in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
-                self._prev_state_for_pause = st
-                self._pause_focus = 0
-                self._set_state(S.PAUSE)
+            if st in IN_GAME_STATES:
+                self._enter_pause()
             return
         if st == S.BOOT:
             self._boot_action(action)
@@ -451,20 +495,34 @@ class GameEngine:
         elif st == S.CAL_COURSE:
             self._course_action(action, msg)
         elif st in (S.CAL_PLACE, S.HOLE_START):
-            self._place_action(action)
+            self._place_action(action, msg)
         elif st == S.CAL_OBSTACLES:
             self._obstacles_action(action, msg)
         elif st == S.CAL_CUP:
             self._cup_action(action)
         elif st == S.CAL_BALLS:
-            self._balls_action(action)
+            self._balls_action(action, msg)
         elif st == S.GAME_START:
             self._gamestart_action(action, msg)
         elif st == S.PLAY:
             self._play_action(action)
         elif st == S.HOLE_OUT:
             if action == "undo":
+                self._transition_next = None
                 self._undo_last_shot()
+            elif action == "confirm":
+                self._transition_next = None
+                self._advance_turn()
+        elif st == S.TURN_CHANGE:
+            if action == "confirm":
+                nxt = self._transition_next
+                self._transition_next = None
+                if nxt == "__advance_turn__":
+                    self._advance_turn()
+                elif nxt in SCREEN_BY_STATE:
+                    self._set_state(nxt)
+                else:
+                    self._set_state(S.PLAY)
         elif st == S.OOB:
             if action == "confirm":
                 self._advance_turn()
@@ -484,14 +542,25 @@ class GameEngine:
     # ------------------------------------------------------------------ #
     def _on_back(self) -> None:
         st = self.state
+        if self._recal_return and st in (
+            S.CAL_FLOOR, S.CAL_AREA, S.CAL_COURSE, S.CAL_PLACE,
+            S.CAL_OBSTACLES, S.CAL_CUP, S.CAL_BALLS, S.VERIFY,
+        ):
+            self._finish_recal()
+            return
         if st in (S.CAL_FLOOR,):
+            self._capture_until = 0.0
             self._set_state(S.SENSOR_CHECK)
         elif st == S.VERIFY:
             self._set_state(self._verify_return)
         elif st == S.CAL_AREA:
             self._set_state(S.CAL_FLOOR)
         elif st == S.CAL_COURSE:
-            self._set_state(S.CAL_AREA)
+            dest = self._course_return or S.CAL_AREA
+            self._course_return = None
+            if dest == S.CAL_AREA and not self.setup.play_area and self.mapper is None:
+                dest = S.BOOT
+            self._set_state(dest)
         elif st == S.CAL_PLACE:
             self._set_state(S.CAL_COURSE)
         elif st == S.CAL_OBSTACLES:
@@ -516,6 +585,7 @@ class GameEngine:
     # ===================================================================== #
     def _boot_action(self, action: str) -> None:
         if action == "new_game":
+            self._course_return = None
             self._set_state(S.SENSOR_CHECK)
         elif action == "load":
             saved = Setup.load()
@@ -527,6 +597,7 @@ class GameEngine:
             else:
                 self._set_state(S.SENSOR_CHECK)
         elif action == "library":
+            self._course_return = S.BOOT
             self._set_state(S.CAL_COURSE)
         elif action == "settings":
             self._settings_return = S.BOOT
@@ -544,12 +615,15 @@ class GameEngine:
             self.setup = Setup()
             self._set_state(S.CAL_FLOOR)
         elif action == "retry":
-            # Re-probe handled by server; no-op here.
-            pass
+            self.rescan_cameras()
+            self._reconfigure_camera()
 
     def _verify_action(self, action: str) -> None:
         if action == "confirm":
-            self._begin_game_from_setup()
+            if self._recal_return:
+                self._finish_recal()
+            else:
+                self._begin_game_from_setup()
         elif action == "recalibrate":
             self._set_state(S.CAL_FLOOR)
 
@@ -565,8 +639,11 @@ class GameEngine:
             if self._capture_label == "floor" and avg_color is not None:
                 self.reference_color = avg_color
                 self._set_state(S.CAL_AREA)
-            elif self._capture_label == "obstacles" and avg_color is not None and self.mapper is not None:
-                self._propose_obstacles_color(avg_color)
+            elif self._capture_label == "obstacles":
+                if avg_color is not None and self.mapper is not None:
+                    self._propose_obstacles_color(avg_color)
+                else:
+                    self._set_state(S.CAL_OBSTACLES)
             elif self._capture_label == "cup" and avg_color is not None and self.mapper is not None:
                 self._propose_cup_color(avg_color)
             return
@@ -581,8 +658,11 @@ class GameEngine:
                                      "cx": self.cam.cx, "cy": self.cam.cy}
                 self.reference_depth = avg
                 self._set_state(S.CAL_AREA)
-        elif self._capture_label == "obstacles" and avg is not None and self.mapper is not None:
-            self._propose_obstacles(avg)
+        elif self._capture_label == "obstacles":
+            if avg is not None and self.mapper is not None:
+                self._propose_obstacles(avg)
+            else:
+                self._set_state(S.CAL_OBSTACLES)
         elif self._capture_label == "cup" and avg is not None and self.mapper is not None:
             self._propose_cup(avg)
 
@@ -592,14 +672,19 @@ class GameEngine:
         elif action == "undo":
             if self._draw_poly:
                 self._draw_poly.pop()
+            self._dragging = None
         elif action == "clear":
             self._draw_poly = []
+            self._dragging = None
         elif action == "confirm":
             if self.is_color_only:
                 if len(self._draw_poly) == 4:
                     self._build_homography()
             elif len(self.setup.play_area) >= 3:
-                self._set_state(S.CAL_COURSE)
+                if self._recal_return and self._recal_single:
+                    self._finish_recal()
+                else:
+                    self._set_state(S.CAL_COURSE)
 
     def _apply_preset(self, name: str) -> None:
         sizes = {"small": (2.0, 1.5), "medium": (3.0, 2.0), "large": (4.0, 2.5)}
@@ -608,7 +693,11 @@ class GameEngine:
         self._preset_name = name if name in sizes else "medium"
         self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
         self.setup.start = CircleZone(0.0, 0.0, 0.15)
-        self._draw_poly = []
+        # Color-only: the size is the assumed real-world size of the clicked
+        # rectangle. Keep the corners. Depth: seed a floor-space rectangle.
+        if not self.is_color_only:
+            self._draw_poly = []
+            self._dragging = None
 
     def _build_homography(self) -> None:
         """Solve the pixel->floor homography from the four clicked corners."""
@@ -625,7 +714,10 @@ class GameEngine:
         self.setup.start = CircleZone(0.0, 0.0, 0.15)
         self.setup.camera = {"mode": "homography", "w": w, "h": h, "H": H.tolist()}
         self.setup.floor_plane = None
-        self._set_state(S.CAL_COURSE)
+        if self._recal_return and self._recal_single:
+            self._finish_recal()
+        else:
+            self._set_state(S.CAL_COURSE)
 
     def _course_action(self, action: str, msg: dict) -> None:
         if action == "select":
@@ -643,7 +735,12 @@ class GameEngine:
                     self.current_course_id = courses[idx]["id"]
                     self.layout = CourseLayout(courses[idx], self.setup.play_area)
             if self.layout is not None:
-                self._set_state(S.CAL_PLACE)
+                if self._course_return == S.BOOT and (self.mapper is None or not self.setup.play_area):
+                    self._course_return = None
+                    self._set_state(S.SENSOR_CHECK)
+                else:
+                    self._course_return = None
+                    self._set_state(S.CAL_PLACE)
         elif action == "prev" or action == "next":
             courses = load_courses()
             cur = [c["id"] for c in courses].index(self.current_course_id) if self.current_course_id in [c["id"] for c in courses] else 0
@@ -651,12 +748,255 @@ class GameEngine:
             self.current_course_id = courses[cur]["id"]
             self.layout = CourseLayout(courses[cur], self.setup.play_area)
 
-    def _place_action(self, action: str) -> None:
+    def _place_action(self, action: str, msg: dict | None = None) -> None:
+        msg = msg or {}
+        self._capture_until = 0.0
+        self._capture_label = ""
         if action == "confirm":
-            self._start_capture(1.5, "obstacles")
+            self._commit_place_ghosts()
+        elif action == "prev":
+            self._set_state(S.CAL_COURSE)
+        elif action == "select":
+            idx = int(msg.get("index", 0))
+            if 0 <= idx < len(self._place_ghosts):
+                self._selected_ghost = idx
+        elif action == "undo":
+            if self._selected_ghost is not None:
+                self._rotate_ghost(self._selected_ghost)
+        elif action == "secondary":
+            if self._selected_ghost is not None:
+                self._reset_ghost(self._selected_ghost)
+        elif action == "next":
+            self._cycle_ghost(1)
+        elif action == "draw":
+            self._add_custom_ghost()
+        elif action == "delete":
+            self._delete_ghost(self._selected_ghost)
+
+    def _ghost_poly(self, g: dict) -> list[tuple[float, float]]:
+        x, y, w, h = g["cx"], g["cy"], g["w"], g["h"]
+        return [(x - w / 2, y - h / 2), (x + w / 2, y - h / 2),
+                (x + w / 2, y + h / 2), (x - w / 2, y + h / 2)]
+
+    def _init_place_ghosts(self) -> None:
+        if self.layout is None:
+            self._place_ghosts = []
+            self._selected_ghost = None
+            self._place_ghosts_course = None
+            return
+        cid = self.current_course_id
+        if self._place_ghosts and self._place_ghosts_course == cid:
+            return
+        self._place_ghosts = []
+        for g in self.layout.ghost_polygons():
+            item = dict(g)
+            item["home"] = (g["cx"], g["cy"], g["w"], g["h"])
+            item["polygon"] = self._ghost_poly(item)
+            self._place_ghosts.append(item)
+        self._place_ghosts_course = cid
+        self._selected_ghost = 0 if self._place_ghosts else None
+
+    def _sync_ghost_bbox(self, g: dict) -> None:
+        xs = [p[0] for p in g["polygon"]]
+        ys = [p[1] for p in g["polygon"]]
+        g["cx"] = (min(xs) + max(xs)) / 2.0
+        g["cy"] = (min(ys) + max(ys)) / 2.0
+        g["w"] = max(xs) - min(xs)
+        g["h"] = max(ys) - min(ys)
+
+    def _rotate_ghost(self, idx: int) -> None:
+        if not (0 <= idx < len(self._place_ghosts)):
+            return
+        g = self._place_ghosts[idx]
+        cx, cy = g["cx"], g["cy"]
+        g["polygon"] = [(-(y - cy) + cx, (x - cx) + cy) for x, y in g["polygon"]]
+        self._sync_ghost_bbox(g)
+
+    def _reset_ghost(self, idx: int) -> None:
+        if not (0 <= idx < len(self._place_ghosts)):
+            return
+        g = self._place_ghosts[idx]
+        cx, cy, w, h = g["home"]
+        g["cx"], g["cy"], g["w"], g["h"] = cx, cy, w, h
+        g["polygon"] = self._ghost_poly(g)
+
+    def _add_custom_ghost(self) -> None:
+        if self.layout is None and not self.setup.play_area:
+            return
+        if self.setup.play_area:
+            xs = [p[0] for p in self.setup.play_area]
+            ys = [p[1] for p in self.setup.play_area]
+            cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+        else:
+            cx, cy = 0.0, 0.0
+        w = h = 0.35
+        n = len(self._place_ghosts) + 1
+        item = {
+            "id": f"custom{n}", "label": f"Object {n}", "item": "custom outline",
+            "kind": "soft", "real_size_cm": [], "cx": cx, "cy": cy, "w": w, "h": h,
+            "home": (cx, cy, w, h),
+        }
+        item["polygon"] = self._ghost_poly(item)
+        self._place_ghosts.append(item)
+        self._selected_ghost = len(self._place_ghosts) - 1
+
+    def _delete_ghost(self, idx: int | None) -> None:
+        if idx is None or not (0 <= idx < len(self._place_ghosts)):
+            return
+        self._place_ghosts.pop(idx)
+        if not self._place_ghosts:
+            self._selected_ghost = None
+        else:
+            self._selected_ghost = min(idx, len(self._place_ghosts) - 1)
+
+    def _commit_place_ghosts(self) -> None:
+        obstacles = []
+        for i, g in enumerate(self._place_ghosts):
+            poly = [(float(x), float(y)) for x, y in g["polygon"]]
+            if len(poly) < 3:
+                continue
+            obstacles.append(Obstacle(
+                id=str(g.get("id") or f"ob{i}"),
+                label=str(g.get("label") or f"Object {i + 1}"),
+                kind=str(g.get("kind") or "soft"),
+                item=str(g.get("item") or ""),
+                polygon=poly, state="confirmed", confidence=1.0,
+            ))
+        self.setup.obstacles = obstacles
+        self._obstacles_done()
+
+    def _cycle_ghost(self, delta: int) -> None:
+        n = len(self._place_ghosts)
+        if not n:
+            self._selected_ghost = None
+            return
+        cur = self._selected_ghost if self._selected_ghost is not None else 0
+        self._selected_ghost = (cur + delta) % n
+
+    def _hit_ghost(self, nx: float, ny: float) -> int | None:
+        # Prefer the smallest outline that contains the click so a book
+        # sitting on a cushion is selectable instead of the larger shape.
+        best_i, best_a = None, None
+        for i, g in enumerate(self._place_ghosts):
+            pts = self._floor_poly_norm(g["polygon"])
+            if len(pts) < 3 or not point_in_polygon(nx, ny, [(p[0], p[1]) for p in pts]):
+                continue
+            area = 0.0
+            for a, b in zip(pts, pts[1:] + pts[:1]):
+                area += a[0] * b[1] - b[0] * a[1]
+            area = abs(area)
+            if best_a is None or area < best_a:
+                best_i, best_a = i, area
+        return best_i
+
+    def _ghost_corner_feed(self, pt: tuple[float, float]) -> tuple[float, float]:
+        if self.mapper is None:
+            return 0.0, 0.0
+        u, v = self.mapper.floor_to_pixel(pt[0], pt[1])
+        return u / max(1, self._feed_w), v / max(1, self._feed_h)
+
+    def _nearest_ghost_corner(self, gidx: int, nx: float, ny: float, max_d: float = 0.07) -> int | None:
+        if not (0 <= gidx < len(self._place_ghosts)):
+            return None
+        best_i, best_d = None, max_d
+        for i, pt in enumerate(self._place_ghosts[gidx]["polygon"]):
+            cx, cy = self._ghost_corner_feed(pt)
+            d = float(np.hypot(nx - cx, ny - cy))
+            if d < best_d:
+                best_i, best_d = i, d
+        return best_i
+
+    def _nearest_any_ghost_corner(self, nx: float, ny: float, max_d: float = 0.07) -> tuple[int, int] | None:
+        best: tuple[int, int] | None = None
+        best_d = max_d
+        for i, g in enumerate(self._place_ghosts):
+            for ci, pt in enumerate(g["polygon"]):
+                cx, cy = self._ghost_corner_feed(pt)
+                d = float(np.hypot(nx - cx, ny - cy))
+                if d < best_d:
+                    best_d = d
+                    best = (i, ci)
+        return best
+
+    def _parse_place_handle(self, handle: object) -> tuple[int | None, int | None]:
+        if handle is None:
+            return None, None
+        if isinstance(handle, str) and ":" in handle:
+            a, b = handle.split(":", 1)
+            try:
+                return int(a), int(b)
+            except ValueError:
+                return None, None
+        try:
+            return None, int(handle)
+        except (TypeError, ValueError):
+            return None, None
+
+    def _set_ghost_corner(self, gidx: int, cidx: int, nx: float, ny: float) -> None:
+        floor = self._feed_to_floor(nx, ny)
+        if floor is None or not (0 <= gidx < len(self._place_ghosts)):
+            return
+        g = self._place_ghosts[gidx]
+        poly = list(g["polygon"])
+        if not (0 <= cidx < len(poly)):
+            return
+        poly[cidx] = floor
+        g["polygon"] = poly
+        self._sync_ghost_bbox(g)
+
+    def _pointer_place(self, ptype: str, nx: float, ny: float, handle: object = None) -> None:
+        if ptype in ("up", "cancel"):
+            self._dragging = None
+            self._drag_anchor = None
+            return
+        floor = self._feed_to_floor(nx, ny)
+        if ptype == "down":
+            gidx, cidx = self._parse_place_handle(handle)
+            if gidx is None or cidx is None:
+                hit = self._nearest_any_ghost_corner(nx, ny)
+                if hit is not None:
+                    gidx, cidx = hit
+                elif cidx is not None and self._selected_ghost is not None:
+                    gidx = self._selected_ghost
+            if gidx is not None and cidx is not None:
+                if not (0 <= gidx < len(self._place_ghosts)):
+                    gidx, cidx = None, None
+                elif not (0 <= cidx < len(self._place_ghosts[gidx]["polygon"])):
+                    gidx, cidx = None, None
+            if gidx is not None and cidx is not None:
+                self._selected_ghost = gidx
+                self._dragging = ("ghost_corner", gidx, cidx)
+                self._set_ghost_corner(gidx, cidx, nx, ny)
+                return
+            hit = self._hit_ghost(nx, ny)
+            if hit is None:
+                return
+            self._selected_ghost = hit
+            self._dragging = ("ghost", hit)
+            g = self._place_ghosts[hit]
+            if floor is not None:
+                self._drag_anchor = (floor[0] - g["cx"], floor[1] - g["cy"])
+            return
+        if ptype != "move":
+            return
+        if self._dragging and self._dragging[0] == "ghost_corner":
+            _, gidx, cidx = self._dragging
+            self._set_ghost_corner(int(gidx), int(cidx), nx, ny)
+            return
+        if self._dragging and self._dragging[0] == "ghost" and floor is not None:
+            idx = int(self._dragging[1])
+            if not (0 <= idx < len(self._place_ghosts)):
+                return
+            g = self._place_ghosts[idx]
+            ax, ay = self._drag_anchor or (0.0, 0.0)
+            dx, dy = floor[0] - ax - g["cx"], floor[1] - ay - g["cy"]
+            g["cx"] += dx
+            g["cy"] += dy
+            g["polygon"] = [(x + dx, y + dy) for x, y in g["polygon"]]
 
     def _propose_obstacles(self, avg: np.ndarray) -> None:
         if self.plane is None or self.mapper is None:
+            self._set_state(S.CAL_OBSTACLES)
             return
         cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) if self.setup.hole else None
         proposals = detect_obstacles(avg, self.plane, self.cam, self.mapper,
@@ -674,10 +1014,18 @@ class GameEngine:
 
     def _propose_obstacles_color(self, avg_color: np.ndarray) -> None:
         if self.mapper is None:
+            self._set_state(S.CAL_OBSTACLES)
             return
         cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) if self.setup.hole else None
-        proposals = detect_obstacles_color(self.reference_color, avg_color, self.mapper,
-                                           self.setup.play_area, cup)
+        ref = self.reference_color
+        if ref is not None and avg_color is not None and ref.shape != avg_color.shape:
+            import cv2
+            ref = cv2.resize(ref, (avg_color.shape[1], avg_color.shape[0]), interpolation=cv2.INTER_AREA)
+        try:
+            proposals = detect_obstacles_color(ref, avg_color, self.mapper,
+                                               self.setup.play_area, cup)
+        except Exception:
+            proposals = []
         confirmed = [o for o in self.setup.obstacles if o.state == "confirmed"]
         new_obs: list[Obstacle] = list(confirmed)
         for p in proposals:
@@ -689,11 +1037,12 @@ class GameEngine:
         self._set_state(S.CAL_OBSTACLES)
 
     def _match_template_label(self, poly) -> str | None:
-        if self.layout is None:
+        ghosts = self._place_ghosts or (self.layout.ghost_polygons() if self.layout else [])
+        if not ghosts:
             return None
         cx = sum(p[0] for p in poly) / len(poly)
         cy = sum(p[1] for p in poly) / len(poly)
-        for g in self.layout.ghost_polygons():
+        for g in ghosts:
             if abs(cx - g["cx"]) < 0.3 and abs(cy - g["cy"]) < 0.3:
                 return g["label"]
         return None
@@ -740,9 +1089,11 @@ class GameEngine:
                 self._selected_obstacle = int(idx)
 
     def _obstacles_done(self) -> None:
-        # After the course/obstacles are confirmed: resume play on a rebuild
-        # (holes 2+), otherwise continue calibration to the cup.
-        if self._rebuilding:
+        # After the course/obstacles are confirmed: return from a mid-game
+        # recal, resume play on a rebuild (holes 2+), or continue to the cup.
+        if self._recal_return and self._recal_single:
+            self._finish_recal()
+        elif self._rebuilding and not self._recal_return:
             self._set_state(S.PLAY)
         else:
             self._set_state(S.CAL_CUP)
@@ -762,15 +1113,53 @@ class GameEngine:
         self.setup.obstacles.append(o)
         self._selected_obstacle = len(self.setup.obstacles) - 1
 
+    def _ensure_cup(self) -> None:
+        if self.setup.hole is not None:
+            return
+        if self.layout is not None:
+            self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], 0.045)
+            return
+        if self.setup.play_area:
+            xs = [p[0] for p in self.setup.play_area]
+            ys = [p[1] for p in self.setup.play_area]
+            self.setup.hole = CircleZone(sum(xs) / len(xs), sum(ys) / len(ys), 0.045)
+
+    def _reset_cup(self) -> None:
+        self.setup.hole = None
+        self._draw_circle_center = None
+        self._draw_circle_r = 0.0
+        self._dragging = None
+        self._ensure_cup()
+
     def _cup_action(self, action: str) -> None:
+        self._capture_until = 0.0
+        self._capture_label = ""
         if action == "confirm":
-            self._set_state(S.CAL_BALLS)
-        elif action == "redetect":
-            self._start_capture(1.5, "cup")
-        elif action == "draw":
+            self._ensure_cup()
+            if self.setup.hole is not None:
+                if self._recal_return and self._recal_single:
+                    self._finish_recal()
+                else:
+                    self._set_state(S.CAL_BALLS)
+        elif action == "redetect" or action == "undo":
+            self._reset_cup()
+        elif action == "draw" or action == "secondary":
+            self.setup.hole = None
             self._draw_circle_center = None
             self._draw_circle_r = 0.0
-            self._dragging = ("circle", "radius")
+            self._dragging = None
+        elif action == "grow":
+            self._nudge_cup_r(0.008)
+        elif action == "shrink":
+            self._nudge_cup_r(-0.008)
+
+    def _nudge_cup_r(self, delta: float) -> None:
+        self._ensure_cup()
+        if self.setup.hole is None:
+            return
+        r = float(np.clip(self.setup.hole.r + delta, 0.03, 0.18))
+        self.setup.hole = CircleZone(self.setup.hole.x, self.setup.hole.y, r)
+        self._draw_circle_r = r
 
     def _propose_cup(self, avg: np.ndarray) -> None:
         # The cup is a new static above-floor blob containing a white ring.
@@ -815,11 +1204,141 @@ class GameEngine:
         if best is not None:
             self.setup.hole = CircleZone(best[0], best[1], 0.045)
 
-    def _balls_action(self, action: str) -> None:
+    def _balls_action(self, action: str, msg: dict | None = None) -> None:
+        msg = msg or {}
         if action == "confirm":
-            self._set_state(S.GAME_START)
+            if not self.players:
+                return
+            self._renumber_setup_players()
+            self._derive_players_from_balls()
+            if self._recal_return:
+                self._finish_recal()
+            else:
+                self._set_state(S.GAME_START)
         elif action == "add_ball":
-            self._ensure_mock_balls(min(6, len(self._mock_balls) + 1))
+            if self.is_mock:
+                self._ensure_mock_balls(min(6, len(self._mock_balls) + 1))
+                self._derive_players_from_balls()
+        elif action == "select":
+            idx = int(msg.get("index", -1))
+            if 0 <= idx < len(self.players):
+                self._selected_setup_player = idx
+        elif action == "delete":
+            idx = int(msg.get("index", len(self.players) - 1))
+            self._remove_setup_player(idx)
+        elif action == "move_up":
+            self._move_setup_player(int(msg.get("index", 0)), -1)
+        elif action == "move_down":
+            self._move_setup_player(int(msg.get("index", 0)), 1)
+        elif action in ("next", "prev") and self.players:
+            cur = self._selected_setup_player or 0
+            step = 1 if action == "next" else -1
+            self._selected_setup_player = (cur + step) % len(self.players)
+
+    def _maybe_scan_setup_balls(self, now: float) -> None:
+        if self.is_mock or self.mapper is None or self._frame_color is None:
+            return
+        if now - self._last_ball_scan < 0.4:
+            return
+        self._last_ball_scan = now
+        cup = None
+        if self.setup.hole is not None:
+            cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r)
+        for det in detect_setup_balls(
+            self._frame_color, self.reference_color, self.mapper,
+            self.setup.play_area, cup,
+        ):
+            self._offer_setup_ball(det)
+
+    def _offer_setup_ball(self, det: dict, manual: bool = False) -> None:
+        pos = det.get("pos")
+        hue = det.get("hue_name")
+        if pos is None or hue not in ("white", "orange", "yellow", "pink", "blue"):
+            return
+        if not manual and hue in self._dismissed_hues:
+            return
+        if manual:
+            self._dismissed_hues.discard(hue)
+        # One player per color — move the existing marker instead of minting another.
+        for i, p in enumerate(self.players):
+            if p.hue_name != hue:
+                continue
+            bid = self.ball_for_player.get(p.id, f"ball{i}")
+            self._ball_positions[bid] = (float(pos[0]), float(pos[1]))
+            if det.get("color"):
+                p.color = det["color"]
+                p.hue_range = det.get("hue_range")
+            self._selected_setup_player = i
+            return
+        if len(self.players) >= 6:
+            return
+        self._add_setup_player(pos, det)
+
+    def _add_setup_player(self, pos: tuple[float, float], det: dict) -> None:
+        used = {p.id for p in self.players}
+        n = 0
+        while f"p{n}" in used:
+            n += 1
+        pid, bid = f"p{n}", f"ball{n}"
+        i = len(self.players)
+        color = det.get("color") or PLAYER_COLORS[i % len(PLAYER_COLORS)]
+        hue_name = det.get("hue_name") or HUE_NAMES.get(color, "custom")
+        player = Player(
+            id=pid, name=f"Player {i + 1}", color=color,
+            hue_name=hue_name, hue_range=det.get("hue_range"), order=i,
+        )
+        self.players.append(player)
+        self.ball_for_player[pid] = bid
+        self._ball_positions[bid] = (float(pos[0]), float(pos[1]))
+        self._selected_setup_player = i
+        if det.get("rejected"):
+            self._rejected_balls.add(bid)
+
+    def _remove_setup_player(self, idx: int) -> None:
+        if not (0 <= idx < len(self.players)):
+            return
+        p = self.players.pop(idx)
+        if p.hue_name:
+            self._dismissed_hues.add(p.hue_name)
+        bid = self.ball_for_player.pop(p.id, None)
+        if bid:
+            self._ball_positions.pop(bid, None)
+            self._rejected_balls.discard(bid)
+        self._renumber_setup_players()
+        if not self.players:
+            self._selected_setup_player = None
+        else:
+            self._selected_setup_player = min(idx, len(self.players) - 1)
+
+    def _move_setup_player(self, idx: int, delta: int) -> None:
+        j = idx + delta
+        if not (0 <= idx < len(self.players) and 0 <= j < len(self.players)):
+            return
+        self.players[idx], self.players[j] = self.players[j], self.players[idx]
+        self._renumber_setup_players()
+        self._selected_setup_player = j
+
+    def _renumber_setup_players(self) -> None:
+        for i, p in enumerate(self.players):
+            p.order = i
+
+    def _pointer_balls(self, ptype: str, nx: float, ny: float) -> None:
+        if ptype != "down" or self.mapper is None:
+            return
+        floor = self._feed_to_floor(nx, ny)
+        if floor is None:
+            return
+        if self._frame_color is None:
+            return
+        h, w = self._frame_color.shape[:2]
+        ix = int(np.clip(nx * w, 0, w - 1))
+        iy = int(np.clip(ny * h, 0, h - 1))
+        bgr = tuple(int(c) for c in self._frame_color[iy, ix])
+        swatch = classify_ball_swatch(bgr, loose=True)
+        if swatch is None:
+            return
+        swatch["pos"] = floor
+        self._offer_setup_ball(swatch, manual=True)
 
     def _gamestart_action(self, action: str, msg: dict) -> None:
         if action == "confirm":
@@ -832,21 +1351,47 @@ class GameEngine:
             # "Course is set" from new-object prompt handled elsewhere; no-op.
             pass
 
+    def _enter_pause(self) -> None:
+        if self.state == S.PAUSE:
+            return
+        self._prev_state_for_pause = self.state
+        self._pause_focus = 0
+        self._recal_flyout = False
+        self._set_state(S.PAUSE)
+
     def _pause_action(self, action: str, msg: dict) -> None:
         rows = ["resume", "undo", "fix", "recalibrate", "course", "music", "quit"]
-        if action == "resume" or action == "back":
+        if action == "resume":
+            self._recal_flyout = False
+            self._set_state(self._prev_state_for_pause)
+        elif action == "back":
+            if self._recal_flyout or self._pause_focus == 3:
+                self._pause_set_focus(0)
+                return
             self._set_state(self._prev_state_for_pause)
         elif action == "down":
-            self._pause_focus = (self._pause_focus + 1) % len(rows)
+            self._pause_set_focus((self._pause_focus + 1) % len(rows))
         elif action == "up":
-            self._pause_focus = (self._pause_focus - 1) % len(rows)
+            self._pause_set_focus((self._pause_focus - 1) % len(rows))
         elif action == "select":
             # A click/Enter on a pause row both focuses and activates it.
-            self._pause_focus = int(msg.get("index", 0))
-            self._pause_activate(rows[self._pause_focus])
+            # Recalibrate only opens the flyout — the six cards do the work.
+            self._pause_set_focus(int(msg.get("index", 0)))
+            row = rows[self._pause_focus]
+            if row != "recalibrate":
+                self._pause_activate(row)
         elif action == "confirm":
             row = rows[self._pause_focus]
+            if row == "recalibrate":
+                self._recal_flyout = True
+                return
             self._pause_activate(row)
+        elif action == "recalibrate":
+            self._pause_set_focus(3)
+        elif action in ("fix", "course", "music", "quit"):
+            self._pause_activate(action)
+        elif action and action.startswith("recal_"):
+            self._start_recal(action[6:])
         elif action == "undo":
             self._set_state(self._prev_state_for_pause)
             self._undo_last_shot()
@@ -860,14 +1405,83 @@ class GameEngine:
         elif row == "fix":
             self._set_state(S.FIX_SCORE)
         elif row == "recalibrate":
-            self._recal_flyout = not self._recal_flyout
+            self._recal_flyout = True
         elif row == "course":
+            self._recal_return = S.PAUSE
+            self._recal_single = True
             self._set_state(S.CAL_COURSE)
         elif row == "music":
             self._settings_return = S.PAUSE
             self._set_state(S.SETTINGS)
         elif row == "quit":
             self._set_state(S.BOOT)
+
+    def _pause_set_focus(self, index: int) -> None:
+        self._pause_focus = int(index)
+        self._recal_flyout = self._pause_focus == 3
+
+    def _start_recal(self, kind: str) -> None:
+        kind = (kind or "").strip().lower()
+        targets = {"cup", "balls", "area", "obstacles", "floor", "verify"}
+        if kind not in targets:
+            return
+        self._recal_return = S.PAUSE
+        self._recal_single = kind != "floor"
+        self._recal_flyout = False
+        if kind == "cup":
+            self._set_state(S.CAL_CUP)
+        elif kind == "balls":
+            self._set_state(S.CAL_BALLS)
+        elif kind == "area":
+            self._seed_area_from_setup()
+            self._set_state(S.CAL_AREA)
+        elif kind == "obstacles":
+            self._seed_place_ghosts_from_obstacles()
+            self._set_state(S.CAL_PLACE)
+        elif kind == "floor":
+            self._set_state(S.CAL_FLOOR)
+        else:
+            self._verify_return = S.PAUSE
+            self._set_state(S.VERIFY)
+
+    def _finish_recal(self) -> None:
+        dest = self._recal_return or S.PAUSE
+        self._recal_return = None
+        self._recal_single = False
+        self._recal_flyout = False
+        self._pause_focus = 3
+        self._save_setup()
+        self._set_state(dest)
+
+    def _seed_area_from_setup(self) -> None:
+        if self._draw_poly:
+            return
+        if self.mapper is None or not self.setup.play_area:
+            return
+        pts = self._floor_poly_norm(self.setup.play_area)
+        if len(pts) >= 4:
+            self._draw_poly = [(float(x), float(y)) for x, y in pts[:4]]
+
+    def _seed_place_ghosts_from_obstacles(self) -> None:
+        kept = [o for o in self.setup.obstacles if o.state != "deleted" and len(o.polygon) >= 3]
+        if not kept:
+            return
+        ghosts = []
+        for o in kept:
+            poly = [(float(x), float(y)) for x, y in o.polygon]
+            xs = [p[0] for p in poly]
+            ys = [p[1] for p in poly]
+            cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+            w, h = max(xs) - min(xs), max(ys) - min(ys)
+            ghosts.append({
+                "id": o.id, "label": o.label, "kind": o.kind, "item": o.item,
+                "cx": cx, "cy": cy, "w": max(w, 0.05), "h": max(h, 0.05),
+                "home": (cx, cy, max(w, 0.05), max(h, 0.05)),
+                "polygon": poly,
+            })
+        self._place_ghosts = ghosts
+        self._place_ghosts_course = self.current_course_id
+        self._selected_ghost = 0 if ghosts else None
 
     def _fixscore_action(self, action: str) -> None:
         if action == "confirm":
@@ -883,6 +1497,13 @@ class GameEngine:
             tabs = ["display", "rules", "players", "camera", "about"]
             idx = int(msg.get("index", 0))
             self._settings_tab = tabs[idx] if 0 <= idx < len(tabs) else "display"
+        elif action in ("next", "prev"):
+            tabs = ["display", "rules", "players", "camera", "about"]
+            try:
+                i = tabs.index(self._settings_tab)
+            except ValueError:
+                i = 0
+            self._settings_tab = tabs[(i + (1 if action == "next" else -1)) % len(tabs)]
         elif action == "credits":
             self._set_state(S.CREDITS)
         elif action == "changelog":
@@ -910,7 +1531,8 @@ class GameEngine:
             self._start_new_game()
         elif action == "new_courses":
             self.setup = Setup()
-            self._set_state(S.CAL_COURSE)
+            self._course_return = None
+            self._set_state(S.SENSOR_CHECK)
         elif action == "start":
             self._set_state(S.BOOT)
 
@@ -923,9 +1545,14 @@ class GameEngine:
         ny = float(msg.get("y", 0.0))
         ptype = msg.get("type", "down")
         if st == S.CAL_AREA:
-            self._pointer_area(ptype, nx, ny)
-        elif st == S.CAL_CUP and self._dragging is not None:
-            self._pointer_cup(ptype, nx, ny)
+            handle = msg.get("handle")
+            self._pointer_area(ptype, nx, ny, handle)
+        elif st in (S.CAL_PLACE, S.HOLE_START):
+            self._pointer_place(ptype, nx, ny, msg.get("handle"))
+        elif st == S.CAL_CUP:
+            self._pointer_cup(ptype, nx, ny, msg.get("handle"))
+        elif st == S.CAL_BALLS:
+            self._pointer_balls(ptype, nx, ny)
         elif st == S.CAL_OBSTACLES:
             self._pointer_obstacles(ptype, nx, ny)
         elif st == S.PLAY and ptype == "down":
@@ -945,40 +1572,124 @@ class GameEngine:
                 return self.mapper.depth_pixel_to_floor(px, py, z)
         return self.mapper.pixel_to_floor(px, py)
 
-    def _pointer_area(self, ptype: str, nx: float, ny: float) -> None:
+    def _corner_feed_xy(self, pt: tuple[float, float]) -> tuple[float, float]:
+        """Return a _draw_poly point in normalized feed coordinates."""
         if self.is_color_only:
-            # Store normalized pixel corners; the homography is solved on confirm.
-            if ptype == "down":
-                if len(self._draw_poly) < 4:
-                    self._draw_poly.append((nx, ny))
-            elif ptype == "move":
-                if self._draw_poly:
-                    self._draw_poly[-1] = (nx, ny)
-            return
-        f = self._feed_to_floor(nx, ny)
-        if f is None:
-            return
-        if ptype == "down":
-            self._draw_poly.append(f)
-        elif ptype == "move":
-            if self._draw_poly:
-                self._draw_poly[-1] = f
-        elif ptype == "up":
-            pass
+            return float(pt[0]), float(pt[1])
+        if self.mapper is None:
+            return 0.0, 0.0
+        u, v = self.mapper.floor_to_pixel(pt[0], pt[1])
+        return u / max(1, self._feed_w), v / max(1, self._feed_h)
 
-    def _pointer_cup(self, ptype: str, nx: float, ny: float) -> None:
+    def _nearest_area_corner(self, nx: float, ny: float, max_d: float = 0.2) -> int | None:
+        best_i, best_d = None, max_d
+        for i, pt in enumerate(self._draw_poly):
+            cx, cy = self._corner_feed_xy(pt)
+            d = float(np.hypot(nx - cx, ny - cy))
+            if d < best_d:
+                best_i, best_d = i, d
+        return best_i
+
+    def _set_area_corner(self, idx: int, nx: float, ny: float) -> None:
+        if not (0 <= idx < len(self._draw_poly)):
+            return
+        if self.is_color_only:
+            self._draw_poly[idx] = (nx, ny)
+            return
         f = self._feed_to_floor(nx, ny)
-        if f is None:
+        if f is not None:
+            self._draw_poly[idx] = f
+
+    def _pointer_area(self, ptype: str, nx: float, ny: float, handle: object = None) -> None:
+        if ptype == "up" or ptype == "cancel":
+            self._dragging = None
             return
         if ptype == "down":
-            self._draw_circle_center = f
-            self._dragging = ("circle", "radius")
-        elif ptype == "move" and self._draw_circle_center is not None:
-            self._draw_circle_r = np.hypot(f[0] - self._draw_circle_center[0], f[1] - self._draw_circle_center[1])
-        elif ptype == "up":
+            hit = None
+            if handle is not None:
+                try:
+                    hi = int(handle)
+                except (TypeError, ValueError):
+                    hi = -1
+                if 0 <= hi < len(self._draw_poly):
+                    hit = hi
+            if hit is None:
+                hit = self._nearest_area_corner(nx, ny)
+            if hit is not None:
+                self._dragging = ("area", hit)
+                self._set_area_corner(hit, nx, ny)
+                return
+            if len(self._draw_poly) >= 4:
+                return
+            if self.is_color_only:
+                self._draw_poly.append((nx, ny))
+            else:
+                f = self._feed_to_floor(nx, ny)
+                if f is None:
+                    return
+                self._draw_poly.append(f)
+            self._dragging = ("area", len(self._draw_poly) - 1)
+            return
+        if ptype == "move":
+            idx = None
+            if handle is not None:
+                try:
+                    idx = int(handle)
+                except (TypeError, ValueError):
+                    idx = None
+            if idx is None and self._dragging and self._dragging[0] == "area":
+                idx = int(self._dragging[1])
+            if idx is None:
+                return
+            self._dragging = ("area", idx)
+            self._set_area_corner(idx, nx, ny)
+
+    def _pointer_cup(self, ptype: str, nx: float, ny: float, handle: object = None) -> None:
+        if ptype in ("up", "cancel"):
             if self._draw_circle_center is not None and self._draw_circle_r > 0.02:
                 self.setup.hole = CircleZone(self._draw_circle_center[0], self._draw_circle_center[1], self._draw_circle_r)
-                self._dragging = None
+            self._dragging = None
+            self._draw_circle_center = None
+            return
+        f = self._feed_to_floor(nx, ny)
+        if f is None:
+            return
+        if ptype == "down":
+            if self.setup.hole is None:
+                self.setup.hole = CircleZone(f[0], f[1], 0.045)
+                self._dragging = ("circle", "center")
+                return
+            u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y) if self.mapper else (0, 0)
+            cx = u / max(1, self._feed_w)
+            cy = v / max(1, self._feed_h)
+            ru = 0.03
+            if self.mapper is not None:
+                ru = self.mapper.radius_to_pixels(self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) / max(1, self._feed_w)
+            handle_hit = handle is not None or float(np.hypot(nx - (cx + ru), ny - cy)) < 0.05
+            if handle_hit:
+                self._dragging = ("circle", "radius")
+                self._draw_circle_center = (self.setup.hole.x, self.setup.hole.y)
+                self._draw_circle_r = max(0.03, float(np.hypot(f[0] - self.setup.hole.x, f[1] - self.setup.hole.y)))
+                return
+            if float(np.hypot(nx - cx, ny - cy)) < max(ru + 0.03, 0.06):
+                self._dragging = ("circle", "center")
+                return
+            self.setup.hole = CircleZone(f[0], f[1], self.setup.hole.r)
+            self._dragging = ("circle", "center")
+            return
+        if ptype == "move" and self._dragging and self._dragging[0] == "circle":
+            mode = self._dragging[1]
+            if mode == "center":
+                r = self.setup.hole.r if self.setup.hole else 0.045
+                self.setup.hole = CircleZone(f[0], f[1], r)
+            elif mode == "radius":
+                c = self._draw_circle_center
+                if c is None and self.setup.hole is not None:
+                    c = (self.setup.hole.x, self.setup.hole.y)
+                if c is None:
+                    return
+                self._draw_circle_r = max(0.03, float(np.hypot(f[0] - c[0], f[1] - c[1])))
+                self.setup.hole = CircleZone(c[0], c[1], self._draw_circle_r)
 
     def _pointer_obstacles(self, ptype: str, nx: float, ny: float) -> None:
         f = self._feed_to_floor(nx, ny)
@@ -1244,15 +1955,17 @@ class GameEngine:
         # Register tracked balls with hue ranges sampled from their colors.
         for p in self.players:
             ball_id = self.ball_for_player.get(p.id)
-            hue_range = self._hue_range_for_color(p.color)
-            p.hue_range = hue_range
-            self.tracker.add_ball(ball_id or p.id, p.id, p.color, hue_range)
+            if p.hue_range is None and p.hue_name not in ("white", "black"):
+                p.hue_range = self._hue_range_for_color(p.color)
+            self.tracker.add_ball(ball_id or p.id, p.id, p.color, p.hue_range)
 
-    def _hue_range_for_color(self, hex_color: str) -> tuple[int, int]:
+    def _hue_range_for_color(self, hex_color: str) -> tuple[int, int] | None:
         import cv2
         bgr = np.uint8([[hex_to_bgr(hex_color)]])
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0][0]
-        h = int(hsv[0])
+        h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
+        if s < 50:
+            return None
         lo = max(0, h - 15)
         hi = min(179, h + 15)
         return (lo, hi)
@@ -1355,6 +2068,8 @@ class GameEngine:
                 self.finished_hole[p.id] = True
                 self.events.append(EventType.HOLE_OUT, p.id, self.hole)
                 self._set_state(S.HOLE_OUT)
+                self._transition_next = "__advance_turn__"
+                self._transition_until = time.time() + 5.0
                 return
         # Out of bounds?
         if self.setup.play_area and not point_in_polygon(pos[0], pos[1], self.setup.play_area):
@@ -1479,20 +2194,35 @@ class GameEngine:
             return {"step": 1}
         if st == S.CAL_AREA:
             return {"step": 2, "presets": ["small", "medium", "large"],
-                    "preset": self._preset_name}
+                    "preset": self._preset_name,
+                    "color_only": self.is_color_only,
+                    "area_w": round(self._preset_w, 1),
+                    "area_h": round(self._preset_h, 1),
+                    "corners": len(self._draw_poly)}
         if st == S.CAL_COURSE:
             aw, ah = self._play_area_size()
             return {"courses": self._courses_snapshot(), "step": 3,
                     "area_w": aw, "area_h": ah}
         if st in (S.CAL_PLACE, S.HOLE_START):
-            return {"step": 3, "ghosts": self._ghosts_snapshot(), "course": course_by_id(self.current_course_id)}
+            return {"step": 3, "ghosts": self._ghosts_snapshot(),
+                    "course": course_by_id(self.current_course_id),
+                    "selected": self._selected_ghost}
         if st == S.CAL_OBSTACLES:
             return {"step": 3, "obstacles": [o.as_dict() for o in self.setup.obstacles],
                     "selected": self._selected_obstacle}
         if st == S.CAL_CUP:
-            return {"step": 4, "searching": self.capturing}
+            h = self.setup.hole
+            return {"step": 4, "has_hole": h is not None,
+                    "hole_r_cm": round((h.r if h else 0.045) * 100)}
         if st == S.CAL_BALLS:
-            return {"step": 5, "balls": self._mock_ball_snapshot(), "players": [p.as_dict() for p in self.players]}
+            return {
+                "step": 5,
+                "balls": self._setup_ball_snapshot(),
+                "players": [p.as_dict() for p in self.players],
+                "rejected": len(self._rejected_balls),
+                "color_only": self.is_color_only,
+                "selected": self._selected_setup_player,
+            }
         if st == S.GAME_START:
             return {"players": [p.as_dict() for p in self.players], "holes": self.holes, "stroke_cap": self.stroke_cap}
         if st == S.PLAY:
@@ -1577,20 +2307,30 @@ class GameEngine:
         return out
 
     def _ghosts_snapshot(self) -> list[dict]:
-        if self.layout is None:
-            return []
+        self._init_place_ghosts()
         ghosts = []
-        for g in self.layout.ghost_polygons():
+        for g in self._place_ghosts:
             ghosts.append({"label": g["label"], "item": g["item"],
-                           "polygon": g["polygon"], "real_size_cm": g["real_size_cm"],
-                           "kind": g["kind"], "seen": False})
+                           "polygon": g["polygon"], "real_size_cm": g.get("real_size_cm", []),
+                           "kind": g.get("kind", "soft"), "seen": bool(g.get("seen"))})
         return ghosts
 
     def _mock_ball_snapshot(self) -> list[dict]:
+        return self._setup_ball_snapshot()
+
+    def _setup_ball_snapshot(self) -> list[dict]:
         out = []
-        for i, b in enumerate(self._mock_balls):
-            out.append({"id": f"ball{i}", "color": PLAYER_COLORS[i % len(PLAYER_COLORS)],
-                        "x": b["x"], "y": b["y"], "hue_name": HUE_NAMES.get(PLAYER_COLORS[i % len(PLAYER_COLORS)], "custom")})
+        for i, p in enumerate(self.players):
+            bid = self.ball_for_player.get(p.id, f"ball{i}")
+            pos = self._ball_positions.get(bid)
+            if pos is None and i < len(self._mock_balls):
+                pos = (self._mock_balls[i]["x"], self._mock_balls[i]["y"])
+            out.append({
+                "id": bid, "color": p.color,
+                "x": pos[0] if pos else 0.0, "y": pos[1] if pos else 0.0,
+                "hue_name": p.hue_name or HUE_NAMES.get(p.color, "custom"),
+                "rejected": bid in self._rejected_balls,
+            })
         return out
 
     def _hud_snapshot(self) -> dict:
@@ -1708,6 +2448,25 @@ class GameEngine:
     def _norm(self, px: float, py: float) -> list[float]:
         return [round(px / max(1, self._feed_w), 4), round(py / max(1, self._feed_h), 4)]
 
+    def _rect_dimension_labels(self, pts: list[list[float]], width_m: float, height_m: float) -> list[dict]:
+        """Width along the top edge, height along the right edge (design S05)."""
+        if len(pts) < 4:
+            return []
+        ordered = sorted(((float(p[0]), float(p[1])) for p in pts), key=lambda p: (p[1], p[0]))
+        top = sorted(ordered[:2], key=lambda p: p[0])
+        bot = sorted(ordered[2:], key=lambda p: p[0])
+        tl, tr, br = top[0], top[1], bot[1]
+        top_mid = ((tl[0] + tr[0]) / 2, min(tl[1], tr[1]) - 0.035)
+        right_mid = (max(tr[0], br[0]) + 0.03, (tr[1] + br[1]) / 2)
+        return [
+            {"type": "label", "x": max(0.06, min(0.94, top_mid[0])),
+             "y": max(0.09, top_mid[1]), "text": f"{width_m:g} m",
+             "fill": "#f2efe8", "size": 0.032, "anchor": "middle", "id": "dim_w"},
+            {"type": "label", "x": min(0.94, right_mid[0]),
+             "y": max(0.08, min(0.94, right_mid[1])), "text": f"{height_m:g} m",
+             "fill": "#f2efe8", "size": 0.032, "anchor": "start", "id": "dim_h"},
+        ]
+
     def _floor_poly_norm(self, poly: list[tuple[float, float]]) -> list[list[float]]:
         if self.mapper is None:
             return []
@@ -1720,20 +2479,91 @@ class GameEngine:
     def _overlay_snapshot(self) -> dict:
         o = {"shapes": []}
         # Color-only calibration: show clicked corners before a homography exists.
-        if self.is_color_only and self.state == S.CAL_AREA and self.mapper is None and self._draw_poly:
-            for i, (nx, ny) in enumerate(self._draw_poly):
-                o["shapes"].append({"type": "circle", "x": nx, "y": ny, "r": 0.012,
-                                    "fill": "#8be9c3", "stroke": "#15171c", "stroke_width": 2,
-                                    "label": str(i + 1), "id": f"corner{i}"})
+        if self.is_color_only and self.state == S.CAL_AREA and self.mapper is None:
+            n = len(self._draw_poly)
+            size_txt = f"{self._preset_w:g} × {self._preset_h:g} m"
+            o["shapes"].append({
+                "type": "label", "x": 0.5, "y": 0.055,
+                "text": (f"{n} of 4 corners · this rectangle is {size_txt}"
+                         if n else f"Click the four corners of a {size_txt} rectangle"),
+                "fill": "#8be9c3", "size": 0.026, "anchor": "middle",
+                "id": "area_hint",
+            })
+            if self._draw_poly:
+                pts = [[float(x), float(y)] for x, y in self._draw_poly]
+                if len(pts) >= 2:
+                    closed = len(pts) >= 4
+                    o["shapes"].append({
+                        "type": "polygon" if closed else "polyline",
+                        "pts": pts,
+                        "stroke": "#f2efe8", "stroke_width": 4,
+                        "fill": "rgba(242,239,232,0.07)" if closed else "none",
+                        "id": "play_area_draft",
+                    })
+                drag = self._dragging[1] if self._dragging and self._dragging[0] == "area" else None
+                for i, (nx, ny) in enumerate(self._draw_poly):
+                    active = i == drag
+                    o["shapes"].append({
+                        "type": "circle", "x": nx, "y": ny,
+                        "r": 0.032 if active else 0.024,
+                        "fill": "#8be9c3" if active else "#f2efe8",
+                        "stroke": "#15171c", "stroke_width": 3,
+                        "label": f"corner {i + 1}" if active else str(i + 1),
+                        "id": f"corner{i}",
+                    })
+                if len(pts) >= 4:
+                    o["shapes"].extend(self._rect_dimension_labels(pts, self._preset_w, self._preset_h))
             return o
         if self.mapper is None:
             return o
         st = self.state
         # Play area.
         if self.setup.play_area:
-            o["shapes"].append({"type": "polygon", "pts": self._floor_poly_norm(self.setup.play_area),
+            area_pts = self._floor_poly_norm(self.setup.play_area)
+            o["shapes"].append({"type": "polygon", "pts": area_pts,
                                 "stroke": "#f2efe8", "stroke_opacity": 0.75, "stroke_width": 3,
                                 "fill": "rgba(242,239,232,0.06)", "id": "play_area"})
+            if st == S.CAL_AREA and len(area_pts) >= 4:
+                aw, ah = self._play_area_size()
+                o["shapes"].extend(self._rect_dimension_labels(area_pts, aw, ah))
+        # Course ghosts (place-your-objects).
+        if st in (S.CAL_PLACE, S.HOLE_START):
+            self._init_place_ghosts()
+            for i, g in enumerate(self._place_ghosts):
+                selected = i == self._selected_ghost
+                pts = self._floor_poly_norm(g["polygon"])
+                o["shapes"].append({
+                    "type": "polygon",
+                    "pts": pts,
+                    "stroke": "#8be9c3" if selected else "#f2efe8",
+                    "stroke_width": 5 if selected else 3,
+                    "dash": "" if selected else "16 10",
+                    "fill": "rgba(139,233,195,0.16)" if selected else "rgba(242,239,232,0.07)",
+                    "label": g.get("label") or f"Object {i + 1}",
+                    "id": f"ghost{i}",
+                })
+                drag = None
+                if self._dragging and self._dragging[0] == "ghost_corner" and int(self._dragging[1]) == i:
+                    drag = int(self._dragging[2])
+                for ci, (px, py) in enumerate(pts):
+                    active = selected and ci == drag
+                    o["shapes"].append({
+                        "type": "circle", "x": px, "y": py,
+                        "r": 0.026 if active else (0.018 if selected else 0.012),
+                        "fill": "#8be9c3" if active else ("#f2efe8" if selected else "rgba(242,239,232,0.7)"),
+                        "stroke": "#15171c", "stroke_width": 2,
+                        "label": str(ci + 1) if selected else None,
+                        "id": f"g{i}c{ci}",
+                    })
+            if self.setup.hole is None and self.layout is not None:
+                hx, hy = self.layout.hole
+                u, v = self.mapper.floor_to_pixel(hx, hy)
+                ru = self.mapper.radius_to_pixels(hx, hy, 0.045)
+                o["shapes"].append({"type": "circle",
+                                    "x": u / self._feed_w, "y": v / self._feed_h,
+                                    "r": ru / self._feed_w, "stroke": "#8be9c3",
+                                    "stroke_width": 3, "dash": "10 8",
+                                    "fill": "none", "label": "Cup goes here", "id": "hole_ghost"})
         # Start.
         if self.setup.start is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.start.x, self.setup.start.y)
@@ -1745,9 +2575,18 @@ class GameEngine:
         if self.setup.hole is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y)
             ru = self.mapper.radius_to_pixels(self.setup.hole.x, self.setup.hole.y, self.setup.hole.r)
-            o["shapes"].append({"type": "circle", "x": u / self._feed_w, "y": v / self._feed_h,
-                                "r": ru / self._feed_w, "stroke": "#8be9c3", "stroke_width": 4,
-                                "fill": "rgba(139,233,195,0.25)", "label": None, "id": "hole"})
+            hx, hy = u / self._feed_w, v / self._feed_h
+            hr = ru / max(1, self._feed_w)
+            o["shapes"].append({"type": "circle", "x": hx, "y": hy,
+                                "r": hr, "stroke": "#8be9c3", "stroke_width": 4,
+                                "fill": "rgba(139,233,195,0.25)",
+                                "label": "HOLE" if st == S.CAL_CUP else None, "id": "hole"})
+            if st == S.CAL_CUP:
+                o["shapes"].append({
+                    "type": "circle", "x": hx + hr, "y": hy, "r": 0.02,
+                    "fill": "#8be9c3", "stroke": "#15171c", "stroke_width": 3,
+                    "label": "size", "id": "corner0",
+                })
         # Obstacles.
         for ob in self.setup.obstacles:
             if ob.state == "deleted":
@@ -1765,15 +2604,41 @@ class GameEngine:
             o["shapes"].append({"type": "polygon", "pts": self._floor_poly_norm(ob.polygon),
                                 "id": f"obstacle_{ob.id}", "label": ob.label, **style})
         # Balls + trail.
+        if st == S.CAL_BALLS and not self.players:
+            o["shapes"].append({
+                "type": "label", "x": 0.5, "y": 0.14,
+                "text": "Click each ball on the camera to add a player",
+                "fill": "#8be9c3", "size": 0.024, "anchor": "middle", "id": "ball_hint",
+            })
         for i, p in enumerate(self.players):
             ball_id = self.ball_for_player.get(p.id, f"ball{i}")
             pos = self._ball_positions.get(ball_id)
             if pos is None:
                 continue
             u, v = self.mapper.floor_to_pixel(*pos)
-            o["shapes"].append({"type": "circle", "x": u / self._feed_w, "y": v / self._feed_h,
-                                "r": 0.012, "fill": p.color, "stroke": "#f2efe8", "stroke_width": 3,
-                                "label": p.name, "id": f"ball_{p.id}"})
+            x, y = u / self._feed_w, v / self._feed_h
+            rejected = ball_id in self._rejected_balls
+            selected = st == S.CAL_BALLS and i == self._selected_setup_player
+            label = f"{i + 1} · {p.hue_name or 'ball'} · {p.name}"
+            if rejected:
+                label = "Too close to the cup color — swap it"
+            if st == S.CAL_BALLS:
+                o["shapes"].append({
+                    "type": "circle", "x": x, "y": y,
+                    "r": 0.038 if selected else 0.03,
+                    "fill": "none",
+                    "stroke": "#8be9c3" if selected else p.color,
+                    "stroke_width": 6 if selected else 4,
+                    "id": f"ballring_{p.id}",
+                })
+            o["shapes"].append({
+                "type": "circle", "x": x, "y": y,
+                "r": 0.016 if selected else 0.013,
+                "fill": p.color,
+                "stroke": "#ff6b57" if rejected else "#15171c",
+                "stroke_width": 3,
+                "label": label, "id": f"ball_{p.id}",
+            })
         return o
 
     def _depth_at_floor(self, x: float, y: float) -> float:
@@ -1790,7 +2655,11 @@ class GameEngine:
         if self._frame_color is None:
             return None
         import cv2
-        ok, buf = cv2.imencode(".jpg", self._frame_color, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        img = self._frame_color
+        h, w = img.shape[:2]
+        if w > 960:
+            img = cv2.resize(img, (960, max(1, int(h * 960 / w))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 62])
         if not ok:
             return None
         return buf.tobytes()

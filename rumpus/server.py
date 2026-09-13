@@ -85,12 +85,24 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                 time.sleep(0.1)
                 continue
             interval = 1.0 / max(10.0, min(30.0, float(engine.backend.description.fps))) if engine.backend else 0.1
+
+            def drain_input() -> None:
+                last_move = None
+                while True:
+                    try:
+                        msg = input_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if msg.get("t") == "pointer" and msg.get("type") == "move":
+                        last_move = msg
+                    else:
+                        engine.handle_input(msg)
+                if last_move is not None:
+                    engine.handle_input(last_move)
+
+            drain_input()
             engine.tick(frame)
-            while True:  # drain user input (engine access stays single-threaded)
-                try:
-                    engine.handle_input(input_queue.get_nowait())
-                except queue.Empty:
-                    break
+            drain_input()
             jpeg = engine.encode_frame()
             broadcaster.publish(engine.snapshot(), jpeg)
             time.sleep(interval)

@@ -63,19 +63,20 @@ class BallTracker:
 
     # ------------------------------------------------------------------ #
     def update(self, color_bgr, depth_mm, mapper: FloorMapper, cam: CameraModel,
-               plane, confirmed_obstacles: list, now: float | None = None) -> None:
+               plane, confirmed_obstacles: list, now: float | None = None,
+               play_area: list | None = None) -> None:
         now = now if now is not None else time.time()
         if depth_mm is None:
             # Color-only source (webcam): detect by hue mask, map via homography.
-            dets = self._detect_color(color_bgr, mapper)
+            dets = self._detect_color(color_bgr, mapper, play_area)
             self._match_color(dets, now)
         else:
-            detections = self._detect(color_bgr, depth_mm, mapper, cam, plane)
+            detections = self._detect(color_bgr, depth_mm, mapper, cam, plane, play_area)
             self._match(detections, mapper, now)
         self._update_motion(now, cam, confirmed_obstacles, mapper)
 
     # -- detection -------------------------------------------------------- #
-    def _detect(self, color_bgr, depth_mm, mapper, cam, plane):
+    def _detect(self, color_bgr, depth_mm, mapper, cam, plane, play_area=None):
         if depth_mm is None or color_bgr is None:
             return []
         hmap = height_map(depth_mm, plane, cam)
@@ -94,28 +95,38 @@ class BallTracker:
                 continue
             hue = self._sample_hue(color_bgr, r["mask"], cy, cx)
             fx, fy = mapper.depth_pixel_to_floor(cx, cy, z)
+            if play_area and not _point_in_poly(float(fx), float(fy), play_area):
+                continue
             out.append({"pos": (fx, fy), "hue": hue, "z": z})
         return out
 
-    def _detect_color(self, color_bgr, mapper) -> list[dict]:
-        """Color-only detection: per-ball hue mask -> largest plausible blob."""
+    def _detect_color(self, color_bgr, mapper, play_area=None) -> list[dict]:
+        """Color-only detection: per-ball hue mask inside the play area.
+
+        Prefer the blob nearest the last known position so a lamp or sock
+        outside the last putt does not steal the track.
+        """
         out: list[dict] = []
         if color_bgr is None:
             return out
         hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
         h = hsv[..., 0]
         s = hsv[..., 1]
+        v = hsv[..., 2]
         for ball in self.balls.values():
             if ball.hue_range is None:
-                continue
-            lo, hi = ball.hue_range
-            mask = self._hue_mask(h, s, lo, hi)
+                # White ball: bright and almost no saturation (not beige carpet).
+                mask = ((s < 32) & (v > 205)).astype(np.uint8) * 255
+            else:
+                lo, hi = ball.hue_range
+                mask = self._hue_mask(h, s, lo, hi)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
             cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for c in sorted(cnts, key=cv2.contourArea, reverse=True):
+            candidates: list[tuple[float, float, tuple[float, float]]] = []
+            for c in cnts:
                 area = float(cv2.contourArea(c))
                 if area < 20.0:
-                    break
+                    continue
                 m = cv2.moments(c)
                 if m["m00"] == 0:
                     continue
@@ -124,13 +135,23 @@ class BallTracker:
                 f = mapper.pixel_to_floor(float(cx), float(cy))
                 if f is None:
                     continue
-                out.append({"ball_id": ball.id, "pos": (float(f[0]), float(f[1]))})
-                break
+                fx, fy = float(f[0]), float(f[1])
+                if play_area and not _point_in_poly(fx, fy, play_area):
+                    continue
+                if ball.position is not None:
+                    dist = float(np.hypot(fx - ball.position[0], fy - ball.position[1]))
+                else:
+                    dist = 0.0
+                candidates.append((dist, -area, (fx, fy)))
+            if not candidates:
+                continue
+            candidates.sort()
+            out.append({"ball_id": ball.id, "pos": candidates[0][2]})
         return out
 
     def _hue_mask(self, h: np.ndarray, s: np.ndarray, lo: int, hi: int) -> np.ndarray:
-        """Binary mask of pixels whose hue is in [lo, hi] (circular) & saturated."""
-        sat = s > 60
+        """Binary mask of pixels whose hue is in [lo, hi] (circular) & neon-saturated."""
+        sat = s > 110
         if lo <= hi:
             m = (h >= lo) & (h <= hi) & sat
         else:  # wraps across the 0/180 boundary (e.g. red/pink)
@@ -284,3 +305,157 @@ def _ray_segment(p0, p1, a, b):
     if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
         return (p0[0] + t * dx, p0[1] + t * dy)
     return None
+
+
+# Spec colors: white, neon orange, neon pink, neon yellow. Never green (cup).
+# Beige carpet sits in the orange hue band at medium saturation — require
+# high S/V so the rug cannot register as a ball.
+_BALL_SWATCHES = {
+    "white":  {"color": "#f2efe8", "hue_range": None},
+    "orange": {"color": "#ff8a3d", "hue_range": (8, 24)},
+    "yellow": {"color": "#ffd84d", "hue_range": (22, 38)},
+    "pink":   {"color": "#ff5fa8", "hue_range": (150, 8)},
+    "blue":   {"color": "#5b8cff", "hue_range": (95, 128)},
+}
+
+
+def classify_ball_swatch(bgr: tuple[int, int, int], loose: bool = False) -> dict | None:
+    """Return a player swatch only for white or neon ball colors.
+
+    Carpet / wood / shadows return None. ``loose`` is for a deliberate click.
+    """
+    patch = np.uint8([[bgr]])
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)[0][0]
+    h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
+    name = _name_allowed_ball(h, s, v, loose=loose)
+    if name is None:
+        return None
+    spec = _BALL_SWATCHES[name]
+    return {
+        "color": spec["color"],
+        "hue_name": name,
+        "hue_range": spec["hue_range"],
+        "rejected": False,
+    }
+
+
+def _name_allowed_ball(h: int, s: int, v: int, loose: bool = False) -> str | None:
+    s_white = 40 if loose else 28
+    v_white = 190 if loose else 210
+    s_neon = 90 if loose else 125
+    v_neon = 130 if loose else 155
+    if s <= s_white and v >= v_white:
+        return "white"
+    if s < s_neon or v < v_neon:
+        return None
+    # Green cup band — never a ball, even if saturated.
+    if 40 <= h <= 90:
+        return None
+    if 8 <= h <= 24:
+        return "orange"
+    if 22 <= h <= 38:
+        return "yellow"
+    if h >= 150 or h <= 8:
+        return "pink"
+    if 95 <= h <= 128:
+        return "blue"
+    return None
+
+
+def _allowed_ball_mask(hsv: np.ndarray) -> np.ndarray:
+    """Pixels that look like a white or neon ball — not a beige floor."""
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    white = (s <= 28) & (v >= 210)
+    sat = (s >= 125) & (v >= 155)
+    orange = sat & (h >= 8) & (h <= 24)
+    yellow = sat & (h >= 22) & (h <= 38)
+    pink = sat & ((h >= 150) | (h <= 8))
+    blue = sat & (h >= 95) & (h <= 128)
+    return (white | orange | yellow | pink | blue).astype(np.uint8) * 255
+
+
+def detect_setup_balls(
+    color_bgr,
+    reference_bgr,
+    mapper: FloorMapper,
+    play_area: list[tuple[float, float]] | None,
+    cup: tuple[float, float, float] | None = None,
+) -> list[dict]:
+    """Find white / neon golf balls on a color frame for the S09 assign step.
+
+    Hue + saturation only — no floor differencing (that matched carpet).
+    """
+    if color_bgr is None or mapper is None:
+        return []
+    hh, ww = color_bgr.shape[:2]
+    area_mask = np.zeros((hh, ww), np.uint8)
+    if play_area:
+        pts = []
+        for x, y in play_area:
+            u, v = mapper.floor_to_pixel(x, y)
+            pts.append([int(u), int(v)])
+        if len(pts) >= 3:
+            cv2.fillPoly(area_mask, [np.array(pts, np.int32)], 255)
+        else:
+            area_mask[:] = 255
+    else:
+        area_mask[:] = 255
+
+    hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.bitwise_and(_allowed_ball_mask(hsv), area_mask)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+    if play_area:
+        cx = sum(p[0] for p in play_area) / len(play_area)
+        cy = sum(p[1] for p in play_area) / len(play_area)
+    else:
+        cx = cy = 0.0
+    r_px = max(4.0, float(mapper.radius_to_pixels(cx, cy, 0.0215)))
+    min_a = max(18.0, np.pi * (r_px * 0.4) ** 2)
+    max_a = np.pi * (r_px * 2.4) ** 2
+
+    out: list[dict] = []
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for c in cnts:
+        area = float(cv2.contourArea(c))
+        if area < min_a or area > max_a:
+            continue
+        peri = float(cv2.arcLength(c, True))
+        if peri < 8:
+            continue
+        circ = 4.0 * np.pi * area / (peri * peri)
+        if circ < 0.58:
+            continue
+        m = cv2.moments(c)
+        if m["m00"] == 0:
+            continue
+        px = m["m10"] / m["m00"]
+        py = m["m01"] / m["m00"]
+        floor = mapper.pixel_to_floor(float(px), float(py))
+        if floor is None:
+            continue
+        if play_area and not _point_in_poly(floor[0], floor[1], play_area):
+            continue
+        if cup is not None and np.hypot(floor[0] - cup[0], floor[1] - cup[1]) < cup[2] + 0.06:
+            continue
+        ix, iy = int(np.clip(px, 0, ww - 1)), int(np.clip(py, 0, hh - 1))
+        bgr = tuple(int(x) for x in color_bgr[iy, ix])
+        swatch = classify_ball_swatch(bgr)
+        if swatch is None:
+            continue
+        out.append({"pos": (float(floor[0]), float(floor[1])), **swatch})
+    return out
+
+
+def _point_in_poly(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
+    inside = False
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside

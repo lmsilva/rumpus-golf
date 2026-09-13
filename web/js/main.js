@@ -50,26 +50,36 @@ window.RG = window.RG || {};
       wire();
       applyMarquee();
       if (!restoreFocus(keep)) focusFirst();
+      rumbleFor(screen);
     }
     const slot = scene.querySelector("[data-feed-slot]");
     const feedOn = !(st.feed && st.feed.enabled === false);
     RG.feed.show((FEED_SCREENS.has(screen) && feedOn) || !!slot, slot);
     RG.feed.overlay((st.overlay && st.overlay.shapes) || []);
+    patchS05(st);
     handleMusic(st);
   }
 
   function signature(st) {
     if (st.screen === "S19") return settingsSig(st);
     if (st.screen === "S04") return st.setup && st.setup.capturing ? "cap" : "";
-    if (st.screen === "S05") return (st.ui && st.ui.preset) || "";
+    if (st.screen === "S05") {
+      const n = (st.ui && st.ui.corners) || 0;
+      return `${(st.ui && st.ui.preset) || ""}|${(st.ui && st.ui.color_only) ? 1 : 0}|${n >= 4 ? 1 : 0}`;
+    }
     if (st.screen === "S06") return (st.game && st.game.course_id) || "";
+    if (st.screen === "S07") return `${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
+    if (st.screen === "S08") return (st.ui && st.ui.has_hole) ? "1" : "0";
     if (st.screen === "S10") return [(st.ui && st.ui.holes), (st.ui && st.ui.stroke_cap)].join("|");
     if (st.screen === "S07b" || st.screen === "S07c") {
       const obs = (st.ui && st.ui.obstacles) || [];
       return [st.ui && st.ui.selected, obs.map((o) => `${o.state}:${o.confidence}`).join(",")].join("|");
     }
-    if (st.screen === "S09") return ((st.ui && st.ui.players) || []).map((p) => p.name).join(",");
-    if (st.screen === "S15") return String(st.ui && st.ui.focus);
+    if (st.screen === "S09") {
+      const ps = (st.ui && st.ui.players) || [];
+      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}`;
+    }
+    if (st.screen === "S15") return `${st.ui && st.ui.focus}|${st.ui && st.ui.recal_flyout ? 1 : 0}`;
     if (st.screen !== "S11") return "";
     const g = st.game || {};
     const a = st.ui && st.ui.active_player;
@@ -106,6 +116,23 @@ window.RG = window.RG || {};
     });
   }
 
+  function patchS05(st) {
+    if (st.screen !== "S05") return;
+    const colorOnly = !!(st.ui && st.ui.color_only);
+    const n = (st.ui && st.ui.corners) || 0;
+    const w = (st.ui && st.ui.area_w) || 3;
+    const h = (st.ui && st.ui.area_h) || 2;
+    const prog = scene.querySelector("[data-corner-progress]");
+    if (prog) prog.textContent = colorOnly ? `${n} of 4 corners` : "";
+    const help = scene.querySelector("[data-size-help]");
+    if (help && colorOnly) {
+      help.textContent = `The webcam only sees pixels. ${w} × ${h} m is the real size of the rectangle you marked — that’s what turns those four corners into meters.`;
+    }
+    scene.querySelectorAll("button.btn[data-action=confirm]").forEach((btn) => {
+      btn.disabled = colorOnly && n < 4;
+    });
+  }
+
   function handleMusic(st) {
     if (!RG.settings || !RG.settings.music || RG.settings.music.enabled === false) {
       RG.audio.stopMusic();
@@ -126,6 +153,9 @@ window.RG = window.RG || {};
         RG.audio.sfx(a === "confirm" ? "confirm" : "click");
         const msg = { t: "action", a };
         if (el.hasAttribute("data-index")) msg.index = parseInt(el.getAttribute("data-index"), 10);
+        if (a === "select" && el.classList.contains("course-card")) {
+          scene.querySelectorAll(".course-card").forEach((c) => c.classList.toggle("is-selected", c === el));
+        }
         RG.send(msg);
         e.stopPropagation();
       });
@@ -195,6 +225,7 @@ window.RG = window.RG || {};
     scene.querySelectorAll("input[data-text]").forEach((el) => {
       const key = el.getAttribute("data-text");
       const index = parseInt(el.getAttribute("data-index"), 10);
+      el.addEventListener("click", (e) => e.stopPropagation());
       el.addEventListener("change", () => RG.send({ t: "text", key, index, value: el.value }));
       el.addEventListener("keydown", (e) => { if (e.key === "Enter") { RG.send({ t: "text", key, index, value: el.value }); el.blur(); } e.stopPropagation(); });
     });
@@ -216,7 +247,7 @@ window.RG = window.RG || {};
   // mouse click does). This keeps the browser a dumb display while making every
   // menu reachable without a pointer.
   function focusables() {
-    return Array.from(scene.querySelectorAll("button, [tabindex], input, select, textarea")).filter((el) => {
+    return Array.from(scene.querySelectorAll("button, [tabindex], input, select, textarea, [data-action]")).filter((el) => {
       if (el.disabled || el.getAttribute("aria-hidden") === "true") return false;
       if (el.style && el.style.pointerEvents === "none") return false;
       const r = el.getBoundingClientRect();
@@ -321,6 +352,7 @@ window.RG = window.RG || {};
     const key = e.key;
 
     if (key === "Escape") {
+      e.preventDefault();
       if (isText || isSelect) { ae.blur(); return; }
       RG.send({ t: "action", a: "back" });
       return;
@@ -349,17 +381,141 @@ window.RG = window.RG || {};
       return;
     }
 
+    // Pause extras (INPUT.md): F fix · R recalibrate · C course · M music · Q quit
+    const screen = state && state.screen;
+    if (screen === "S15") {
+      if (key === "f") { RG.send({ t: "action", a: "fix" }); return; }
+      if (key === "r") { RG.send({ t: "action", a: "recalibrate" }); return; }
+      if (key === "c") { RG.send({ t: "action", a: "course" }); return; }
+      if (key === "m") { RG.send({ t: "action", a: "music" }); return; }
+      if (key === "q") { RG.send({ t: "action", a: "quit" }); return; }
+    }
+
     // Global shortcuts (work regardless of focus)
     if (key === "z" || key === "r") { RG.send({ t: "action", a: "undo" }); return; }
     if (key === "y" || key === "d") { RG.send({ t: "action", a: "secondary" }); return; }
     if (key === "f") { toggleFullscreen(); return; }
     if (key === "m") { RG.send({ t: "action", a: "menu" }); return; }
+    if (key === "+" || key === "=") { RG.send({ t: "action", a: "grow" }); return; }
+    if (key === "-" || key === "_") { RG.send({ t: "action", a: "shrink" }); return; }
   });
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
     else document.exitFullscreen();
   }
+
+  function rumbleFor(screen) {
+    if (!(RG.settings && RG.settings.controller && RG.settings.controller.rumble)) return;
+    const spec = screen === "S13" ? [400, 1] : screen === "S12" ? [120, 0.45] : null;
+    if (!spec) return;
+    try {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const p of pads) {
+        if (p && p.vibrationActuator) {
+          p.vibrationActuator.playEffect("dual-rumble", {
+            duration: spec[0], strongMagnitude: spec[1], weakMagnitude: spec[1] * 0.55,
+          });
+        }
+      }
+    } catch (err) { /* ignore */ }
+  }
+
+  // ---- gamepad (same semantic verbs as keyboard) ----
+  const PAD_DEAD = 0.25;
+  const PAD_FIRST = 350;
+  const PAD_REPEAT = 90;
+  const padHeld = {};
+  let stickReady = true;
+  let stickNextAt = 0;
+  window.addEventListener("mousemove", () => scene.classList.add("mouse-nav"));
+
+  function padEdge(buttons, i) {
+    const b = buttons[i];
+    const down = !!(b && (b.pressed || b.value > 0.5));
+    const was = !!padHeld[i];
+    padHeld[i] = down;
+    return down && !was;
+  }
+
+  function dispatchPad(verb) {
+    scene.classList.remove("mouse-nav");
+    if (verb === "confirm") {
+      const ae = document.activeElement;
+      if (ae && scene.contains(ae) && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
+        ae.click();
+      } else {
+        RG.send({ t: "action", a: "confirm" });
+      }
+      return;
+    }
+    if (verb === "next" || verb === "prev") {
+      const screen = state && state.screen;
+      if (screen === "S06" || screen === "S07" || screen === "S09" || screen === "S19") {
+        RG.send({ t: "action", a: verb });
+        return;
+      }
+      moveFocus(verb === "next" ? 1 : -1);
+      return;
+    }
+    RG.send({ t: "action", a: verb });
+  }
+
+  function pollPad() {
+    requestAnimationFrame(pollPad);
+    let pad = null;
+    try {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const p of pads) {
+        if (p && p.buttons && p.buttons.length >= 8) { pad = p; break; }
+      }
+    } catch (err) { return; }
+    const mode = pad ? "controller" : "keyboard";
+    if (mode !== RG.inputMode) {
+      RG.inputMode = mode;
+      if (state) {
+        lastSignature = "";
+        onState(state);
+      }
+    }
+    if (!pad) return;
+    const btns = pad.buttons;
+    if (padEdge(btns, 0)) dispatchPad("confirm");
+    if (padEdge(btns, 1)) dispatchPad("back");
+    if (padEdge(btns, 2)) dispatchPad("undo");
+    if (padEdge(btns, 3)) dispatchPad("secondary");
+    if (padEdge(btns, 4)) dispatchPad("prev");
+    if (padEdge(btns, 5)) dispatchPad("next");
+    if (padEdge(btns, 8) || padEdge(btns, 9)) dispatchPad("menu");
+
+    const now = performance.now();
+    let dx = 0;
+    let dy = 0;
+    if (btns[14] && btns[14].pressed) dx = -1;
+    else if (btns[15] && btns[15].pressed) dx = 1;
+    if (btns[12] && btns[12].pressed) dy = -1;
+    else if (btns[13] && btns[13].pressed) dy = 1;
+    const ax = pad.axes[0] || 0;
+    const ay = pad.axes[1] || 0;
+    if (!dx && Math.abs(ax) > PAD_DEAD) dx = ax > 0 ? 1 : -1;
+    if (!dy && Math.abs(ay) > PAD_DEAD) dy = ay > 0 ? 1 : -1;
+    if (dx || dy) {
+      scene.classList.remove("mouse-nav");
+      if (stickReady) {
+        moveFocus2d(dx, dy);
+        stickReady = false;
+        stickNextAt = now + PAD_FIRST;
+      } else if (now >= stickNextAt) {
+        moveFocus2d(dx, dy);
+        stickNextAt = now + PAD_REPEAT;
+      }
+    } else {
+      stickReady = true;
+    }
+    const ry = pad.axes.length > 3 ? pad.axes[3] : 0;
+    if (Math.abs(ry) > PAD_DEAD) scrollPane(ry > 0 ? 1 : -1);
+  }
+  requestAnimationFrame(pollPad);
 
   // ---- scene scaling ----
   function fit() {

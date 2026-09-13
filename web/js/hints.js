@@ -39,7 +39,7 @@ RG.glyph = function (verb) {
 };
 
 RG.hint = function (verb, label) {
-  return `<span class="hintpill">${RG.glyph(verb)}${label ? `<span>${label}</span>` : ""}</span>`;
+  return `<button type="button" class="hintpill" data-action="${verb}">${RG.glyph(verb)}${label ? `<span>${label}</span>` : ""}</button>`;
 };
 
 RG.btnHint = function (verb) {
