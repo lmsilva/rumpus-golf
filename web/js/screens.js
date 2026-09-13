@@ -188,7 +188,7 @@ S.S06 = function (st) {
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;flex:1">
       ${courses.map((c, i) => {
         const sel = c.id === cur;
-        return `<div class="card" data-action="select" data-index="${i}" style="text-align:left;cursor:pointer;${sel ? "background:var(--text);color:var(--player-text);border:2px solid var(--text)" : "border:2px solid transparent"}">
+        return `<div class="card" data-action="select" data-index="${i}" tabindex="0" role="button" style="text-align:left;cursor:pointer;${sel ? "background:var(--text);color:var(--player-text);border:2px solid var(--text)" : "border:2px solid transparent"}">
           <div class="row" style="justify-content:space-between">
             <div><div class="kicker" style="opacity:.7">${esc(c.level)}</div>
             <div style="font:800 40px/1 var(--font-display)">${esc(c.name)}</div></div>

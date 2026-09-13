@@ -292,7 +292,13 @@ class GameEngine:
     def _handle_action(self, action: str, msg: dict) -> None:
         st = self.state
         if action == "back":
-            self._on_back()
+            # Esc during play pauses (per INPUT.md: "Pause | Esc").
+            if st in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
+                self._prev_state_for_pause = st
+                self._pause_focus = 0
+                self._set_state(S.PAUSE)
+            else:
+                self._on_back()
             return
         if action == "menu":
             if st in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
@@ -619,7 +625,9 @@ class GameEngine:
         elif action == "up":
             self._pause_focus = (self._pause_focus - 1) % len(rows)
         elif action == "select":
+            # A click/Enter on a pause row both focuses and activates it.
             self._pause_focus = int(msg.get("index", 0))
+            self._pause_activate(rows[self._pause_focus])
         elif action == "confirm":
             row = rows[self._pause_focus]
             self._pause_activate(row)

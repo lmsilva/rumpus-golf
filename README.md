@@ -96,15 +96,15 @@ still runs and falls back to the mock.
 ## Assets (fonts / photos / music / SFX)
 
 - **Fonts** (Outfit, Manrope — OFL) are bundled in `web/assets/fonts/`.
-- **Photos** (Unsplash, no attribution required) and **music/SFX** (CC BY 4.0 /
-  CC0) are referenced but *not committed*. Drop files into:
-  - `web/assets/photos/{s01..s21}.jpg` — see `requirements/…/ASSETS.md` for the
-    exact images and the Credits strings (already wired into S20).
-  - `web/assets/music/LobbyTime.mp3`, `web/assets/music/BackedVibesClean.mp3`
-  - `web/assets/sfx/*` (optional; the turn sting, cheer, putter tick, thunk and
-    plink are synthesized in the browser via WebAudio already).
-  Without them the screens fall back to gradients and stay silent except for the
-  synthesized SFX. Attribution strings are shown on the Credits screen.
+- **Photos** (Unsplash, no attribution required) are bundled in
+  `web/assets/photos/{s01..s21}.jpg` — see `requirements/…/ASSETS.md` for the
+  exact images and Credits strings (already wired into S20).
+- **Music** (Kevin MacLeod — CC BY 4.0) is bundled in `web/assets/music/`
+  (`LobbyTime.mp3`, `BackedVibesClean.mp3`).
+- **SFX** (Kenney — CC0) are bundled in `web/assets/sfx/` for click, confirm,
+  back, putter tick, thunk and plink. The turn sting and cheer are synthesized
+  in the browser (WebAudio) and used as fallbacks if a bundled file is missing.
+  Attribution strings are shown on the Credits screen.
 
 ## Project layout
 
@@ -135,6 +135,7 @@ in code:
   corner editing is represented but minimal).
 - **Ball setup on real Kinect** detects the mock's balls; on hardware the same
   tracker path is used, with a "reject green" check at the hue-sampling layer.
-- **Photos/music** are drop-in (see Assets) rather than committed binaries.
+- **Photos/music/SFX** are bundled and committed (see Assets) so the game works
+  offline.
 - **Announcer voice** is a stub (the turn-change "sting" is synthesized; a TTS
   hook is left for a future pass).

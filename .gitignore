@@ -14,20 +14,13 @@ rumpus-setup.json
 rumpus-settings.json
 rumpus-game.json
 
-# Media / assets that must be dropped in (large binaries, photos, music)
-web/assets/photos/*.jpg
-web/assets/photos/*.jpeg
-web/assets/music/*.mp3
-web/assets/music/*.ogg
-web/assets/sfx/*.mp3
-web/assets/sfx/*.wav
-web/assets/sfx/*.ogg
+# Media / assets
+# Photos, music and SFX are bundled and committed so the game works offline
+# (see requirements/design_handoff_rumpus_golf/ASSETS.md for attribution).
 
-# Bundled fonts are committed (small, OFL-licensed); only ad-hoc fonts are ignored
+# Fonts: bundled woff2 is committed (small, OFL); ad-hoc ttf/otf are ignored
 web/assets/fonts/*.ttf
 web/assets/fonts/*.otf
-!web/assets/fonts/*.woff2
-!web/assets/**/.gitkeep
 
 # OS / editor
 .DS_Store

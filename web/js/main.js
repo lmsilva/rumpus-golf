@@ -48,6 +48,7 @@ window.RG = window.RG || {};
       lastSignature = sig;
       wire();
       applyMarquee();
+      focusFirst();
     }
     RG.feed.show(FEED_SCREENS.has(screen));
     RG.feed.overlay((st.overlay && st.overlay.shapes) || []);
@@ -130,16 +131,74 @@ window.RG = window.RG || {};
     });
   }
 
-  // ---- keyboard shortcuts ----
+  // ---- keyboard navigation & shortcuts ----
+  // Focus is a DOM concern: arrows / Tab move a visible focus ring, Enter /
+  // Space activate the focused control (which sends the same semantic action a
+  // mouse click does). This keeps the browser a dumb display while making every
+  // menu reachable without a pointer.
+  function focusables() {
+    return Array.from(scene.querySelectorAll("button, [tabindex], input, select, textarea")).filter((el) => {
+      if (el.disabled) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+  }
+  function moveFocus(delta) {
+    const els = focusables();
+    if (!els.length) return;
+    const idx = els.indexOf(document.activeElement);
+    const next = idx < 0 ? (delta > 0 ? 0 : els.length - 1) : (idx + delta + els.length) % els.length;
+    els[next].focus({ preventScroll: true });
+    try { els[next].scrollIntoView({ block: "nearest" }); } catch (err) {}
+  }
+  function focusFirst() {
+    const els = focusables();
+    const first = els.find((el) => el.tagName === "BUTTON");
+    if (first) first.focus({ preventScroll: true });
+  }
+  function scrollPane(dir) {
+    const ae = document.activeElement;
+    let node = ae;
+    while (node && node !== scene) {
+      if (node.scrollHeight > node.clientHeight + 4) {
+        node.scrollBy({ top: dir * (node.clientHeight * 0.8) });
+        return;
+      }
+      node = node.parentElement;
+    }
+  }
+
   window.addEventListener("keydown", (e) => {
-    if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")) return;
-    if (e.key === "Enter" || e.key === " ") { RG.send({ t: "action", a: "confirm" }); }
-    else if (e.key === "Escape") { RG.send({ t: "action", a: "back" }); }
-    else if (e.key === "z" || e.key === "r") { RG.send({ t: "action", a: "undo" }); }
-    else if (e.key === "y" || e.key === "d") { RG.send({ t: "action", a: "secondary" }); }
-    else if (e.key === "Tab") { e.preventDefault(); RG.send({ t: "action", a: e.shiftKey ? "prev" : "next" }); }
-    else if (e.key === "f") { toggleFullscreen(); }
-    else if (e.key === "m") { RG.send({ t: "action", a: "menu" }); }
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT");
+    if (typing) return; // let the input handle its own keys
+
+    const key = e.key;
+
+    // Movement / focus
+    if (key === "ArrowDown" || key === "ArrowRight") { e.preventDefault(); moveFocus(1); return; }
+    if (key === "ArrowUp" || key === "ArrowLeft") { e.preventDefault(); moveFocus(-1); return; }
+    if (key === "Tab") { e.preventDefault(); moveFocus(e.shiftKey ? -1 : 1); return; }
+    if (key === "PageDown") { e.preventDefault(); scrollPane(1); return; }
+    if (key === "PageUp") { e.preventDefault(); scrollPane(-1); return; }
+
+    // Activate the focused control, else send a generic confirm.
+    if (key === "Enter" || key === " ") {
+      if (ae && ae !== document.body && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
+        e.preventDefault();
+        ae.click();
+      } else {
+        RG.send({ t: "action", a: "confirm" });
+      }
+      return;
+    }
+
+    // Global shortcuts (work regardless of focus)
+    if (key === "Escape") { RG.send({ t: "action", a: "back" }); return; }
+    if (key === "z" || key === "r") { RG.send({ t: "action", a: "undo" }); return; }
+    if (key === "y" || key === "d") { RG.send({ t: "action", a: "secondary" }); return; }
+    if (key === "f") { toggleFullscreen(); return; }
+    if (key === "m") { RG.send({ t: "action", a: "menu" }); return; }
   });
 
   function toggleFullscreen() {

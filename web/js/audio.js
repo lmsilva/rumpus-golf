@@ -39,7 +39,8 @@ window.RG = window.RG || {};
     src.start(t);
   }
 
-  const sfx = {
+  // Synthesized fallbacks (CC0-style, used when a bundled file is absent).
+  const synth = {
     click:   () => tone(880, 0.08, "triangle", 0.12),
     confirm: () => { tone(660, 0.09, "triangle", 0.14); tone(990, 0.12, "triangle", 0.1, 0.04); },
     back:    () => tone(440, 0.09, "triangle", 0.1),
@@ -49,6 +50,28 @@ window.RG = window.RG || {};
     cheer:   () => { for (let i = 0; i < 6; i++) noise(0.2, 0.05, i * 0.09); },
     sting:   () => { tone(523.25, 0.18, "sine", 0.16); tone(784.0, 0.22, "sine", 0.16, 0.18); },
   };
+
+  // Bundled SFX (Kenney CC0). Cheer & the turn sting stay synthesized.
+  const SFX_FILES = {
+    click: "click.ogg", confirm: "confirm.ogg", back: "back.ogg",
+    putter: "putter.ogg", thunk: "thunk.ogg", plink: "plink.ogg",
+  };
+  const sfxCache = {};   // name -> HTMLAudioElement, or null once known-missing
+
+  function playSfx(name) {
+    const file = SFX_FILES[name];
+    if (!file) { (synth[name] || (() => {}))(); return; }
+    if (sfxCache[name] === null) { (synth[name] || (() => {}))(); return; }
+    if (!sfxCache[name]) {
+      const el = new Audio(`/assets/sfx/${file}`);
+      el.preload = "auto";
+      el.addEventListener("error", () => { sfxCache[name] = null; });
+      sfxCache[name] = el;
+    }
+    const el = sfxCache[name];
+    el.currentTime = 0;
+    el.play().catch(() => { sfxCache[name] = null; (synth[name] || (() => {}))(); });
+  }
 
   let musicEl = null;
   let musicName = "";
@@ -64,7 +87,7 @@ window.RG = window.RG || {};
   RG.audio = {
     sfx(name) {
       if (!RG.settings || !RG.settings.sfx || RG.settings.sfx.enabled === false) return;
-      (sfx[name] || (() => {}))();
+      playSfx(name);
     },
     music(name) {
       if (name === musicName) return;
