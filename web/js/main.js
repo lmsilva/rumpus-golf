@@ -50,7 +50,11 @@ window.RG = window.RG || {};
       lastSignature = sig;
       wire();
       applyMarquee();
-      if (!restoreFocus(keep)) focusFirst();
+      if (screen === "S15" && focusPauseRow(st)) {
+        /* mint highlight is server-driven — follow it, not the old DOM node */
+      } else if (!restoreFocus(keep)) {
+        focusFirst();
+      }
       rumbleFor(screen);
     }
     const slot = scene.querySelector("[data-feed-slot]");
@@ -67,7 +71,7 @@ window.RG = window.RG || {};
     if (st.screen === "S04") return st.setup && st.setup.capturing ? "cap" : "";
     if (st.screen === "S05") {
       const n = (st.ui && st.ui.corners) || 0;
-      return `${(st.ui && st.ui.preset) || ""}|${(st.ui && st.ui.color_only) ? 1 : 0}|${n >= 4 ? 1 : 0}`;
+      return `${(st.ui && st.ui.preset) || ""}|${(st.ui && st.ui.color_only) ? 1 : 0}|${n}`;
     }
     if (st.screen === "S06") return (st.game && st.game.course_id) || "";
     if (st.screen === "S07") return `${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
@@ -367,7 +371,31 @@ window.RG = window.RG || {};
     if (best) activate(best);
     else moveFocus(dy || dx);
   }
+  function focusPauseRow(st) {
+    const ui = (st || state || {}).ui || {};
+    const idx = ui.focus != null ? ui.focus : 0;
+    const row = scene.querySelector(`button[data-action="select"][data-index="${idx}"]`);
+    if (!row) return false;
+    activate(row);
+    return true;
+  }
+  function pauseArrow(dir) {
+    scene.classList.remove("mouse-nav");
+    const ae = document.activeElement;
+    const onCard = ae && ae.getAttribute && String(ae.getAttribute("data-action") || "").startsWith("recal_");
+    const flyout = state && state.ui && (state.ui.recal_flyout || state.ui.focus === 3);
+    if (flyout && onCard) {
+      moveFocus2d(dir.dx || 0, dir.dy || 0);
+      return;
+    }
+    if (flyout && !onCard && (dir.dx > 0 || dir.dy > 0)) {
+      const card = scene.querySelector("[data-action^=recal_]");
+      if (card) { activate(card); return; }
+    }
+    RG.send({ t: "action", a: (dir.dy > 0 || dir.dx > 0) ? "down" : "up" });
+  }
   function focusFirst() {
+    if (state && state.screen === "S15" && focusPauseRow(state)) return;
     const els = focusables();
     const first = els.find((el) => el.tagName === "BUTTON" && el.getAttribute("data-action") !== "back") || els[0];
     if (first) activate(first);
@@ -402,11 +430,23 @@ window.RG = window.RG || {};
     if (isRange && (key === "ArrowLeft" || key === "ArrowRight")) return;
 
     // Movement / focus — spatial on arrows, document order on Tab
-    if (key === "ArrowDown") { e.preventDefault(); moveFocus2d(0, 1); return; }
-    if (key === "ArrowUp") { e.preventDefault(); moveFocus2d(0, -1); return; }
-    if (key === "ArrowRight") { e.preventDefault(); moveFocus2d(1, 0); return; }
-    if (key === "ArrowLeft") { e.preventDefault(); moveFocus2d(-1, 0); return; }
-    if (key === "Tab") { e.preventDefault(); moveFocus(e.shiftKey ? -1 : 1); return; }
+    if (key === "ArrowDown" || key === "ArrowUp" || key === "ArrowRight" || key === "ArrowLeft") {
+      e.preventDefault();
+      scene.classList.remove("mouse-nav");
+      if (state && state.screen === "S15") {
+        pauseArrow({
+          dx: key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0,
+          dy: key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : 0,
+        });
+        return;
+      }
+      if (key === "ArrowDown") moveFocus2d(0, 1);
+      else if (key === "ArrowUp") moveFocus2d(0, -1);
+      else if (key === "ArrowRight") moveFocus2d(1, 0);
+      else moveFocus2d(-1, 0);
+      return;
+    }
+    if (key === "Tab") { e.preventDefault(); scene.classList.remove("mouse-nav"); moveFocus(e.shiftKey ? -1 : 1); return; }
     if (key === "PageDown") { e.preventDefault(); scrollPane(1); return; }
     if (key === "PageUp") { e.preventDefault(); scrollPane(-1); return; }
 
@@ -491,6 +531,10 @@ window.RG = window.RG || {};
     }
     if (verb === "next" || verb === "prev") {
       const screen = state && state.screen;
+      if (screen === "S15") {
+        pauseArrow({ dx: 0, dy: verb === "next" ? 1 : -1 });
+        return;
+      }
       if (screen === "S06" || screen === "S07" || screen === "S09" || screen === "S19") {
         RG.send({ t: "action", a: verb });
         return;
@@ -541,12 +585,16 @@ window.RG = window.RG || {};
     if (!dy && Math.abs(ay) > PAD_DEAD) dy = ay > 0 ? 1 : -1;
     if (dx || dy) {
       scene.classList.remove("mouse-nav");
+      const step = () => {
+        if (state && state.screen === "S15") pauseArrow({ dx, dy });
+        else moveFocus2d(dx, dy);
+      };
       if (stickReady) {
-        moveFocus2d(dx, dy);
+        step();
         stickReady = false;
         stickNextAt = now + PAD_FIRST;
       } else if (now >= stickNextAt) {
-        moveFocus2d(dx, dy);
+        step();
         stickNextAt = now + PAD_REPEAT;
       }
     } else {

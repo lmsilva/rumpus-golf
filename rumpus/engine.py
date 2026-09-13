@@ -431,8 +431,11 @@ class GameEngine:
     def _on_enter(self, state: str) -> None:
         if state == S.BOOT:
             self.events = EventLog()
-        elif state == S.CAL_AREA and not self.setup.play_area:
-            self._apply_preset("medium")
+        elif state == S.CAL_AREA:
+            if not self.setup.play_area and not self._draw_poly:
+                self._apply_preset("medium")
+            elif not self._draw_poly:
+                self._seed_area_from_setup()
         elif state == S.CAL_COURSE and not self.layout:
             self.layout = CourseLayout(course_by_id(self.current_course_id), self.setup.play_area)
         elif state in (S.CAL_PLACE, S.HOLE_START):
@@ -628,6 +631,8 @@ class GameEngine:
             else:
                 self._begin_game_from_setup()
         elif action == "recalibrate":
+            # Full wizard from Verify — do not jump back after the first step.
+            self._recal_single = False
             self._set_state(S.CAL_FLOOR)
 
     def _floor_action(self, action: str) -> None:
@@ -683,8 +688,13 @@ class GameEngine:
             if self.is_color_only:
                 if len(self._draw_poly) == 4:
                     self._build_homography()
-            elif len(self.setup.play_area) >= 3:
+            else:
+                if len(self._draw_poly) >= 3:
+                    self.setup.play_area = [(float(x), float(y)) for x, y in self._draw_poly]
+                if len(self.setup.play_area) < 3:
+                    return
                 if self._recal_return and self._recal_single:
+                    self._refresh_layout_after_area()
                     self._finish_recal()
                 else:
                     self._set_state(S.CAL_COURSE)
@@ -699,7 +709,7 @@ class GameEngine:
         # Color-only: the size is the assumed real-world size of the clicked
         # rectangle. Keep the corners. Depth: seed a floor-space rectangle.
         if not self.is_color_only:
-            self._draw_poly = []
+            self._draw_poly = list(self.setup.play_area)
             self._dragging = None
 
     def _build_homography(self) -> None:
@@ -717,10 +727,29 @@ class GameEngine:
         self.setup.start = CircleZone(0.0, 0.0, 0.15)
         self.setup.camera = {"mode": "homography", "w": w, "h": h, "H": H.tolist()}
         self.setup.floor_plane = None
+        self._refresh_layout_after_area()
         if self._recal_return and self._recal_single:
             self._finish_recal()
         else:
             self._set_state(S.CAL_COURSE)
+
+    def _refresh_layout_after_area(self) -> None:
+        """Keep start / hole / ghosts in the new play-area frame after a redraw."""
+        if not self.setup.play_area:
+            return
+        course = None
+        if self.layout is not None:
+            course = self.layout.course
+        if course is None:
+            course = course_by_id(self.current_course_id)
+        if course is None:
+            return
+        try:
+            self.layout = CourseLayout(course, self.setup.play_area)
+        except Exception:
+            return
+        s = self.layout.start
+        self.setup.start = CircleZone(s["x"], s["y"], s.get("r", 0.15))
 
     def _course_action(self, action: str, msg: dict) -> None:
         if action == "select":
@@ -1436,7 +1465,7 @@ class GameEngine:
         elif kind == "balls":
             self._set_state(S.CAL_BALLS)
         elif kind == "area":
-            self._seed_area_from_setup()
+            self._seed_area_from_setup(force=True)
             self._set_state(S.CAL_AREA)
         elif kind == "obstacles":
             self._seed_place_ghosts_from_obstacles()
@@ -1453,17 +1482,23 @@ class GameEngine:
         self._recal_single = False
         self._recal_flyout = False
         self._pause_focus = 3
+        self._refresh_layout_after_area()
         self._save_setup()
         self._set_state(dest)
 
-    def _seed_area_from_setup(self) -> None:
-        if self._draw_poly:
+    def _seed_area_from_setup(self, force: bool = False) -> None:
+        """Load the current play-area corners into the S05 editor."""
+        if self._draw_poly and not force:
             return
-        if self.mapper is None or not self.setup.play_area:
+        self._dragging = None
+        if self.is_color_only:
+            if self.mapper is not None and self.setup.play_area:
+                pts = self._floor_poly_norm(self.setup.play_area)
+                if len(pts) >= 3:
+                    self._draw_poly = [(float(x), float(y)) for x, y in pts[:4]]
             return
-        pts = self._floor_poly_norm(self.setup.play_area)
-        if len(pts) >= 4:
-            self._draw_poly = [(float(x), float(y)) for x, y in pts[:4]]
+        if self.setup.play_area:
+            self._draw_poly = [(float(x), float(y)) for x, y in self.setup.play_area]
 
     def _seed_place_ghosts_from_obstacles(self) -> None:
         kept = [o for o in self.setup.obstacles if o.state != "deleted" and len(o.polygon) >= 3]
@@ -2422,19 +2457,19 @@ class GameEngine:
             "scores": self.player_scores,
             "finished_hole": self.finished_hole,
             "lost_balls": self._lost_ball_snapshot(),
-            "awaiting_tee": not self._shot_armed,
-            "in_start": self._in_start_zone(pos),
+            "awaiting_tee": bool(not self._shot_armed),
+            "in_start": bool(self._in_start_zone(pos)),
             "ball_seen": bool(tb is not None and tb.position is not None and not tb.lost),
         }
 
     def _ball_motion_status(self) -> dict:
         ball_id = self._active_ball_id()
         tb = self.tracker.balls.get(ball_id) if ball_id else None
-        moving = tb.moving if tb else False
-        hidden = tb.hidden if tb else False
+        moving = bool(tb.moving) if tb else False
+        hidden = bool(tb.hidden) if tb else False
         dist = None
         if tb is not None and tb.smoothed is not None and self.setup.hole is not None:
-            dist = round(np.hypot(tb.smoothed[0] - self.setup.hole.x, tb.smoothed[1] - self.setup.hole.y), 1)
+            dist = float(round(float(np.hypot(tb.smoothed[0] - self.setup.hole.x, tb.smoothed[1] - self.setup.hole.y)), 1))
         return {"moving": moving, "hidden": hidden, "dist_to_cup": dist}
 
     def _lost_ball_snapshot(self) -> list[dict]:
@@ -2528,6 +2563,41 @@ class GameEngine:
     def _norm(self, px: float, py: float) -> list[float]:
         return [round(px / max(1, self._feed_w), 4), round(py / max(1, self._feed_h), 4)]
 
+    def _overlay_cal_area(self) -> dict:
+        o = {"shapes": []}
+        pts = [list(self._corner_feed_xy(pt)) for pt in self._draw_poly]
+        n = len(pts)
+        size_txt = f"{self._preset_w:g} × {self._preset_h:g} m"
+        o["shapes"].append({
+            "type": "label", "x": 0.5, "y": 0.055,
+            "text": (f"{n} of 4 corners · this rectangle is {size_txt}"
+                     if n else f"Click the four corners of a {size_txt} rectangle"),
+            "fill": "#8be9c3", "size": 0.026, "anchor": "middle",
+            "id": "area_hint",
+        })
+        if n >= 2:
+            o["shapes"].append({
+                "type": "polygon" if n >= 4 else "polyline",
+                "pts": pts,
+                "stroke": "#f2efe8", "stroke_width": 4,
+                "fill": "rgba(242,239,232,0.07)" if n >= 4 else "none",
+                "id": "play_area_draft",
+            })
+        drag = self._dragging[1] if self._dragging and self._dragging[0] == "area" else None
+        for i, (nx, ny) in enumerate(pts):
+            active = i == drag
+            o["shapes"].append({
+                "type": "circle", "x": nx, "y": ny,
+                "r": 0.032 if active else 0.024,
+                "fill": "#8be9c3" if active else "#f2efe8",
+                "stroke": "#15171c", "stroke_width": 3,
+                "label": f"corner {i + 1}" if active else str(i + 1),
+                "id": f"corner{i}",
+            })
+        if n >= 4:
+            o["shapes"].extend(self._rect_dimension_labels(pts, self._preset_w, self._preset_h))
+        return o
+
     def _rect_dimension_labels(self, pts: list[list[float]], width_m: float, height_m: float) -> list[dict]:
         """Width along the top edge, height along the right edge (design S05)."""
         if len(pts) < 4:
@@ -2558,42 +2628,10 @@ class GameEngine:
 
     def _overlay_snapshot(self) -> dict:
         o = {"shapes": []}
-        # Color-only calibration: show clicked corners before a homography exists.
-        if self.is_color_only and self.state == S.CAL_AREA and self.mapper is None:
-            n = len(self._draw_poly)
-            size_txt = f"{self._preset_w:g} × {self._preset_h:g} m"
-            o["shapes"].append({
-                "type": "label", "x": 0.5, "y": 0.055,
-                "text": (f"{n} of 4 corners · this rectangle is {size_txt}"
-                         if n else f"Click the four corners of a {size_txt} rectangle"),
-                "fill": "#8be9c3", "size": 0.026, "anchor": "middle",
-                "id": "area_hint",
-            })
-            if self._draw_poly:
-                pts = [[float(x), float(y)] for x, y in self._draw_poly]
-                if len(pts) >= 2:
-                    closed = len(pts) >= 4
-                    o["shapes"].append({
-                        "type": "polygon" if closed else "polyline",
-                        "pts": pts,
-                        "stroke": "#f2efe8", "stroke_width": 4,
-                        "fill": "rgba(242,239,232,0.07)" if closed else "none",
-                        "id": "play_area_draft",
-                    })
-                drag = self._dragging[1] if self._dragging and self._dragging[0] == "area" else None
-                for i, (nx, ny) in enumerate(self._draw_poly):
-                    active = i == drag
-                    o["shapes"].append({
-                        "type": "circle", "x": nx, "y": ny,
-                        "r": 0.032 if active else 0.024,
-                        "fill": "#8be9c3" if active else "#f2efe8",
-                        "stroke": "#15171c", "stroke_width": 3,
-                        "label": f"corner {i + 1}" if active else str(i + 1),
-                        "id": f"corner{i}",
-                    })
-                if len(pts) >= 4:
-                    o["shapes"].extend(self._rect_dimension_labels(pts, self._preset_w, self._preset_h))
-            return o
+        # Play-area editor always draws the live corners — even when a
+        # homography already exists (recalibrate / redraw).
+        if self.state == S.CAL_AREA:
+            return self._overlay_cal_area()
         if self.mapper is None:
             return o
         st = self.state

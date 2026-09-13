@@ -20,6 +20,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+
+def _json_default(o):
+    """NumPy scalars look like bool/int/float but json.dumps rejects them."""
+    if hasattr(o, "item"):
+        try:
+            return o.item()
+        except Exception:
+            pass
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    return str(o)
+
 from .engine import GameEngine
 from .paths import WEB_DIR
 from .sensor import create_backend
@@ -40,7 +52,7 @@ class Broadcaster:
 
     def publish(self, state: dict, frame: bytes | None) -> None:
         with self._lock:
-            self.state_json = json.dumps(state)
+            self.state_json = json.dumps(state, default=_json_default)
             self.frame = frame
             self.seq += 1
 

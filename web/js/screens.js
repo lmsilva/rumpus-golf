@@ -189,8 +189,8 @@ S.S05 = function (st) {
     ["large", "Large", "4 × 2.5 m"],
   ];
   const body = colorOnly
-    ? "This camera cannot measure distance. Click the four corners of a rectangle on the floor whose real size you know — tape, a rug, or the walls of the course."
-    : "Click four or more corners on the floor. Balls stopping outside are out of bounds.";
+    ? "This camera cannot measure distance. Drag a numbered corner, or Clear corners and click four new ones of a rectangle whose real size you know — tape, a rug, or the course edge."
+    : "Drag the corners, or Clear and click a new outline. Balls stopping outside are out of bounds.";
   const sizeKicker = colorOnly ? "How big is that rectangle?" : "Start from a preset";
   const sizeHelp = colorOnly
     ? `The webcam only sees pixels. ${w} × ${h} m is the real size of the rectangle you marked — that’s what turns those four corners into meters.`
@@ -535,8 +535,8 @@ S.S12 = function (st) {
   <div style="position:absolute;inset:0;background:rgba(var(--ground-rgb),.4);z-index:4"></div>
   <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${p.color};color:var(--player-text);border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5">
     <div class="kicker" style="color:var(--player-text);opacity:.65">Next up</div>
-    <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name)}</div>
-    <div style="font:600 32px/1.3 var(--font-body);opacity:.8">${stroke === 0 ? `Place the ${esc(p.hue_name || "")} ball in the start zone` : `Play the ${esc(p.hue_name || "")} ball where it lies · stroke ${stroke}`}</div>
+    <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name || "Player")}</div>
+    <div style="font:600 32px/1.35 var(--font-body);opacity:.8;word-spacing:0.12em">${stroke === 0 ? `Place the ${esc(p.hue_name || "next")} ball in the start zone` : `Play the ${esc(p.hue_name || "next")} ball where it lies · stroke ${stroke}`}</div>
     <div style="margin-top:28px">${RG.hint("confirm", "Skip")}</div>
   </div>`;
 };

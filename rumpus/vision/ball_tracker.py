@@ -268,7 +268,7 @@ class BallTracker:
             if len(recent) >= 2:
                 x0, y0 = recent[0]
                 x1, y1 = recent[-1]
-                ball.moving = np.hypot(x1 - x0, y1 - y0) >= 0.02
+                ball.moving = bool(np.hypot(x1 - x0, y1 - y0) >= 0.02)
             else:
                 ball.moving = False
 
@@ -287,7 +287,7 @@ class BallTracker:
                 pass  # re-acquisition happens via _match (nearby hue blob).
 
             # Lost: > 2 s unseen and not hidden behind an obstacle.
-            ball.lost = (unseen > 2.0) and not ball.hidden
+            ball.lost = bool((unseen > 2.0) and not ball.hidden)
 
     def _heading_intersects(self, pos, heading, obstacles):
         hx, hy = heading
