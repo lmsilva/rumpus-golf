@@ -88,3 +88,9 @@ def detect_sensor() -> Optional[str]:
     if has_v1:
         return "v1"
     return None
+
+
+def list_webcams(max_index: int = 8) -> list[dict]:
+    """Enumerate connected 2D cameras (index, name, working)."""
+    from .webcam import list_webcams as _list
+    return _list(max_index)

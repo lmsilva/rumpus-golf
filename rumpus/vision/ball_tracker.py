@@ -65,8 +65,13 @@ class BallTracker:
     def update(self, color_bgr, depth_mm, mapper: FloorMapper, cam: CameraModel,
                plane, confirmed_obstacles: list, now: float | None = None) -> None:
         now = now if now is not None else time.time()
-        detections = self._detect(color_bgr, depth_mm, mapper, cam, plane)
-        self._match(detections, mapper, now)
+        if depth_mm is None:
+            # Color-only source (webcam): detect by hue mask, map via homography.
+            dets = self._detect_color(color_bgr, mapper)
+            self._match_color(dets, now)
+        else:
+            detections = self._detect(color_bgr, depth_mm, mapper, cam, plane)
+            self._match(detections, mapper, now)
         self._update_motion(now, cam, confirmed_obstacles, mapper)
 
     # -- detection -------------------------------------------------------- #
@@ -91,6 +96,46 @@ class BallTracker:
             fx, fy = mapper.depth_pixel_to_floor(cx, cy, z)
             out.append({"pos": (fx, fy), "hue": hue, "z": z})
         return out
+
+    def _detect_color(self, color_bgr, mapper) -> list[dict]:
+        """Color-only detection: per-ball hue mask -> largest plausible blob."""
+        out: list[dict] = []
+        if color_bgr is None:
+            return out
+        hsv = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2HSV)
+        h = hsv[..., 0]
+        s = hsv[..., 1]
+        for ball in self.balls.values():
+            if ball.hue_range is None:
+                continue
+            lo, hi = ball.hue_range
+            mask = self._hue_mask(h, s, lo, hi)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for c in sorted(cnts, key=cv2.contourArea, reverse=True):
+                area = float(cv2.contourArea(c))
+                if area < 20.0:
+                    break
+                m = cv2.moments(c)
+                if m["m00"] == 0:
+                    continue
+                cx = m["m10"] / m["m00"]
+                cy = m["m01"] / m["m00"]
+                f = mapper.pixel_to_floor(float(cx), float(cy))
+                if f is None:
+                    continue
+                out.append({"ball_id": ball.id, "pos": (float(f[0]), float(f[1]))})
+                break
+        return out
+
+    def _hue_mask(self, h: np.ndarray, s: np.ndarray, lo: int, hi: int) -> np.ndarray:
+        """Binary mask of pixels whose hue is in [lo, hi] (circular) & saturated."""
+        sat = s > 60
+        if lo <= hi:
+            m = (h >= lo) & (h <= hi) & sat
+        else:  # wraps across the 0/180 boundary (e.g. red/pink)
+            m = ((h >= lo) | (h <= hi)) & sat
+        return (m.astype(np.uint8)) * 255
 
     def _sample_hue(self, color_bgr, mask, cy, cx) -> float | None:
         h, w = mask.shape
@@ -146,6 +191,20 @@ class BallTracker:
                 self._accept(ball, best["pos"], now)
                 free.remove(best)
         # Balls with no match: hidden vs lost handled in _update_motion.
+
+    def _match_color(self, detections: list[dict], now: float) -> None:
+        """Assign color-only detections (already keyed by ball id)."""
+        for d in detections:
+            ball = self.balls.get(d["ball_id"])
+            if ball is None:
+                continue
+            # Plausibility: a ball can't teleport unless lost a while.
+            if ball.position is not None:
+                pd = float(np.hypot(d["pos"][0] - ball.position[0],
+                                    d["pos"][1] - ball.position[1]))
+                if pd > 0.5 and (now - ball.last_seen_t) < 1.0:
+                    continue
+            self._accept(ball, d["pos"], now)
 
     def _accept(self, ball, pos, now) -> None:
         if ball.position is not None:

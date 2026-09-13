@@ -38,6 +38,13 @@ class SensorBackend(ABC):
 
     # -- convenience -------------------------------------------------------- #
     @property
+    def has_depth(self) -> bool:
+        """True when ``grab()`` yields a depth frame (Kinect). Color-only
+        sources (regular webcams) override this to False so the vision pipeline
+        maps the floor with a homography instead of a fitted plane."""
+        return True
+
+    @property
     def color_res(self) -> tuple[int, int]:
         return self.description.color_res
 

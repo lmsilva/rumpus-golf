@@ -95,3 +95,13 @@ def contour_to_floor(contour: np.ndarray, mapper, z_mm: np.ndarray) -> list[tupl
             fx, fy = mapper.depth_pixel_to_floor(x, y, z)
             pts.append((fx, fy))
     return pts
+
+
+def contour_to_floor_pixels(contour: np.ndarray, mapper) -> list[tuple[float, float]]:
+    """Convert a pixel-space contour to floor coordinates depth-free (homography)."""
+    pts: list[tuple[float, float]] = []
+    for px, py in contour.reshape(-1, 2):
+        f = mapper.pixel_to_floor(float(px), float(py))
+        if f is not None:
+            pts.append(f)
+    return pts

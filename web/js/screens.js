@@ -621,40 +621,105 @@ S.S18 = function (st) {
   </div>`;
 };
 
+function settingsCard(title, desc, inner) {
+  return `<div class="glass" style="border-radius:20px;padding:24px 28px">
+    ${title ? `<div style="font:700 24px var(--font-display)">${esc(title)}</div>${desc ? `<div style="font:400 16px var(--font-body);color:var(--text-muted);margin-top:2px">${esc(desc)}</div>` : ""}` : ""}
+    ${inner || ""}
+  </div>`;
+}
+
 S.S19 = function (st) {
   const s = st.settings || {};
+  const ui = st.ui || {};
+  const tab = ui.tab || "display";
   const theme = s.theme || "dark";
+  const rules = s.rules || {};
+  const cam = ui.camera || {};
+  const sensor = st.sensor;
+  const tabKeys = ["display", "rules", "players", "camera", "about"];
+
+  const displayTab = `
+    ${settingsCard("Theme", "", `<div class="seg" style="margin-top:12px">${["dark", "light", "auto"].map((t) => `<button class="opt ${theme === t ? "sel" : ""}" data-set-theme="${t}">${t}</button>`).join("")}</div>`)}
+    ${settingsCard("Music", "Menu / gameplay soundtrack", `
+      <div class="row" style="margin-top:10px">
+        <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.music.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-music="${i === 0}">${t}</button>`).join("")}</div>
+      </div>
+      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.music.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.music.volume || 0) * 100)}" data-set-musicvol style="flex:1"></div>`)}
+    ${settingsCard("Sound effects", "Ticks, thunks, plinks", `
+      <div class="row" style="margin-top:10px">
+        <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.sfx.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-sfx="${i === 0}">${t}</button>`).join("")}</div>
+      </div>
+      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.sfx.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.sfx.volume || 0) * 100)}" data-set-sfxvol style="flex:1"></div>`)}
+    ${settingsCard("Announcer", "Say player names on turn change", `<div class="row"><div class="toggle ${s.sfx.announcer ? "on" : ""}" data-set-announcer style="margin-left:auto"><span class="knob"></span></div></div>`)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Controller rumble</div><div class="toggle ${s.controller.rumble ? "on" : ""}" data-set-rumble style="margin-left:auto"><span class="knob"></span></div></div></div>
+      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Show camera feed</div><div class="toggle ${s.display.showCameraFeed ? "on" : ""}" data-set-feed style="margin-left:auto"><span class="knob"></span></div></div></div>
+    </div>`;
+
+  const rulesTab = `
+    ${settingsCard("Holes per game", "1 – 9 holes", `<div class="seg" style="margin-top:12px;flex-wrap:wrap">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button class="opt ${n === rules.holes ? "sel" : ""}" data-set-rule-holes="${n}">${n}</button>`).join("")}</div>`)}
+    ${settingsCard("Stroke cap", "Give up after this many strokes", `<div class="row" style="margin-top:10px">
+      <button class="btn secondary" style="width:56px;height:56px;padding:0;justify-content:center" data-set-rule-cap="${(rules.strokeCap || 8) - 1}">−</button>
+      <span style="font:700 28px var(--font-display);min-width:120px;text-align:center">${rules.strokeCap || 8} strokes</span>
+      <button class="btn secondary" style="width:56px;height:56px;padding:0;justify-content:center" data-set-rule-cap="${(rules.strokeCap || 8) + 1}">+</button>
+    </div>`)}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      ${settingsCard("Out-of-bounds penalty", "Add +1 when a ball leaves the area", `<div class="row"><div class="toggle ${rules.oobPenalty ? "on" : ""}" data-set-rule-oob style="margin-left:auto"><span class="knob"></span></div></div>`)}
+      ${settingsCard("Tunnel bonus", "−1 when a ball goes through a tunnel", `<div class="row"><div class="toggle ${rules.tunnelBonus ? "on" : ""}" data-set-rule-tunnel style="margin-left:auto"><span class="knob"></span></div></div>`)}
+    </div>`;
+
+  const players = (st.game && st.game.players) || [];
+  const playersTab = players.length
+    ? settingsCard("Players", "Saved names & colors", `<div class="col" style="gap:10px;margin-top:14px">${players.map((p) => `<div class="row" style="background:var(--fill-quiet);border-radius:14px;padding:12px 16px">${dot(p.color, 32)}<span style="font:700 24px var(--font-display)">${esc(p.name)}</span><span style="margin-left:auto;font:400 16px var(--font-body);color:var(--text-muted)">${esc(p.hue_name || "")}</span></div>`).join("")}</div>`)
+    : settingsCard("Players", "No players yet", `<div style="font:400 17px var(--font-body);color:var(--text-muted);margin-top:8px">Players are created during setup when you put colored balls on the floor (step 5).</div>`);
+
+  const facts = sensor ? [
+    ["Model", sensor.model],
+    ["Color", `${sensor.color_res[0]} × ${sensor.color_res[1]}`],
+    ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "— (color only)"],
+    ["Field of view", `${sensor.fov_h_deg}°`],
+    ["Reliable range", `${sensor.reliable_min_m} – ${sensor.reliable_max_m} m`],
+    ["Note", sensor.note || ""],
+  ] : [];
+  const devices = cam.devices || [];
+  const cameraTab = `
+    ${settingsCard("Sensor", "What's attached right now", `<div style="display:grid;grid-template-columns:auto 1fr;gap:12px 32px;font:400 20px/1.4 var(--font-body);margin-top:14px">${facts.map(([k, v]) => `<span class="text-muted">${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>`)}
+    ${settingsCard("Camera input", "Choose which device watches the floor", `
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
+        <div class="row"><span style="width:130px">Device</span>
+          ${devices.length
+            ? `<select class="select grow" data-set-camera-device>${devices.map((d) => `<option value="${d.index}" ${d.index === cam.active_device ? "selected" : ""}>${esc(d.name)}${d.working ? "" : " (no signal)"}</option>`).join("")}</select>`
+            : `<span class="text-muted" style="font:400 17px var(--font-body)">${cam.scanning ? "Scanning for cameras…" : "No cameras found"}</span>`}
+        </div>
+        <div class="row"><span style="width:130px">Resolution</span>
+          <select class="select grow" data-set-camera-resolution>${["640x480", "1280x720", "1920x1080"].map((r) => `<option value="${r}" ${r === cam.resolution ? "selected" : ""}>${r}</option>`).join("")}</select>
+        </div>
+        <div class="row"><span style="width:130px">Backend</span>
+          <select class="select grow" data-set-camera-backend>${[["auto", "Auto (Kinect → webcam → mock)"], ["webcam", "Webcam (2D)"], ["kinect", "Kinect only"]].map(([v, l]) => `<option value="${v}" ${v === cam.backend ? "selected" : ""}>${l}</option>`).join("")}</select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn secondary sm" data-action="refresh_cameras"><span>Rescan cameras</span></button>
+        <span class="text-muted" style="font:400 14px var(--font-body)">Camera changes re-run the sensor check.</span>
+      </div>`)}`;
+
+  const aboutTab = `
+    ${settingsCard("Rumpus Golf", "Turn any floor into a mini golf course", `<div style="font:800 56px/1 var(--font-display);margin-top:10px">v${st.version}</div><div style="font:400 17px/1.5 var(--font-body);color:var(--text-muted);margin-top:10px">Python 3.11 · OpenCV · FastAPI. No machine learning, no cloud — just your living room.</div>`)}
+    ${settingsCard("Credits & licenses", "Royalty-free music, sounds & photos", `<div class="col" style="gap:10px;margin-top:12px">
+      <button class="btn secondary sm" data-action="credits" style="justify-content:space-between"><span>Credits</span><span>→</span></button>
+      <button class="btn secondary sm" data-action="changelog" style="justify-content:space-between"><span>What's new</span><span>→</span></button>
+    </div>`)}`;
+
+  const tabContent = { display: displayTab, rules: rulesTab, players: playersTab, camera: cameraTab, about: aboutTab }[tab] || displayTab;
+
   return `
   ${photo("s19", "saturate(.7) brightness(.75)", "linear-gradient(90deg,rgba(21,23,28,.97) 0%,rgba(21,23,28,.92) 48%,rgba(21,23,28,.35) 100%)")}
   <div class="topbar" style="border:none"><span class="brand">Rumpus Golf</span><span class="subtitle">Settings</span><span class="right">${RG.badge()}<span class="hint">${RG.glyph("back")}<span>Back</span></span></span></div>
   <div style="position:absolute;left:56px;top:120px;bottom:56px;width:300px;display:flex;flex-direction:column;gap:8px;z-index:2">
-    ${["Display & sound", "Game rules", "Players", "Camera", "About"].map((t, i) => `<button style="border-radius:14px;padding:16px 20px;font:700 22px var(--font-display);text-align:left;border:none;cursor:pointer;background:${i === 0 ? "var(--text)" : "var(--fill-quiet)"};color:${i === 0 ? "var(--player-text)" : "var(--text)"}" data-action="settings-tab" data-index="${i}">${t}</button>`).join("")}
+    ${["Display & sound", "Game rules", "Players", "Camera", "About"].map((t, i) => `<button data-action="settings-tab" data-index="${i}" style="border-radius:14px;padding:16px 20px;font:700 22px var(--font-display);text-align:left;border:none;cursor:pointer;background:${tabKeys[i] === tab ? "var(--text)" : "var(--fill-quiet)"};color:${tabKeys[i] === tab ? "var(--player-text)" : "var(--text)"}">${t}</button>`).join("")}
     <div style="margin-top:auto;font:400 14px var(--font-body);color:var(--text-muted)">Rumpus Golf v${st.version}</div>
   </div>
-  <div class="col" style="position:absolute;left:388px;top:120px;bottom:56px;width:860px;overflow:auto;gap:12px;z-index:2">
-    <div class="glass" style="border-radius:20px;padding:24px 28px">
-      <div style="font:700 24px var(--font-display)">Theme</div>
-      <div class="seg" style="margin-top:12px">${["dark", "light", "auto"].map((t) => `<button class="opt ${theme === t ? "sel" : ""}" data-set-theme="${t}">${t}</button>`).join("")}</div>
-    </div>
-    <div class="glass" style="border-radius:20px;padding:24px 28px">
-      <div class="row"><div><div style="font:700 24px var(--font-display)">Music</div><div style="font:400 16px var(--font-body);color:var(--text-muted)">Menu / gameplay soundtrack</div></div>
-      <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.music.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-music="${i === 0}">${t}</button>`).join("")}</div></div>
-      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.music.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.music.volume || 0) * 100)}" data-set-musicvol style="flex:1"></div>
-    </div>
-    <div class="glass" style="border-radius:20px;padding:24px 28px">
-      <div class="row"><div><div style="font:700 24px var(--font-display)">Sound effects</div><div style="font:400 16px var(--font-body);color:var(--text-muted)">Ticks, thunks, plinks</div></div>
-      <div class="seg" style="margin-left:auto">${["On", "Off"].map((t, i) => `<button class="opt mint ${(s.sfx.enabled ? 0 : 1) === i ? "sel" : ""}" data-set-sfx="${i === 0}">${t}</button>`).join("")}</div></div>
-      <div class="row" style="margin-top:14px"><span style="width:120px">Volume ${Math.round((s.sfx.volume || 0) * 100)}%</span><input class="slider" type="range" min="0" max="100" value="${Math.round((s.sfx.volume || 0) * 100)}" data-set-sfxvol style="flex:1"></div>
-    </div>
-    <div class="glass" style="border-radius:20px;padding:24px 28px">
-      <div class="row"><div><div style="font:700 20px var(--font-display)">Announcer</div><div style="font:400 15px var(--font-body);color:var(--text-muted)">Say player names on turn change</div></div>
-      <div class="toggle ${s.sfx.announcer ? "on" : ""}" data-set-announcer style="margin-left:auto"><span class="knob"></span></div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Controller rumble</div><div class="toggle ${s.controller.rumble ? "on" : ""}" data-set-rumble style="margin-left:auto"><span class="knob"></span></div></div></div>
-      <div class="glass" style="border-radius:20px;padding:24px 28px"><div class="row"><div style="font:700 20px var(--font-display)">Show camera feed</div><div class="toggle ${s.display.showCameraFeed ? "on" : ""}" data-set-feed style="margin-left:auto"><span class="knob"></span></div></div></div>
-    </div>
-  </div>
+  <div class="col" style="position:absolute;left:388px;top:120px;bottom:56px;width:860px;overflow:auto;gap:12px;z-index:2;padding-right:6px">${tabContent}</div>
   <div class="col" style="position:absolute;right:56px;top:120px;width:240px;gap:12px;z-index:2">
     <button class="glass" style="border-radius:16px;padding:18px 22px;font:700 22px var(--font-display);border:none;text-align:left;cursor:pointer" data-action="credits">Credits →</button>
     <button class="glass" style="border-radius:16px;padding:18px 22px;font:700 22px var(--font-display);border:none;text-align:left;cursor:pointer" data-action="changelog">What’s new</button>

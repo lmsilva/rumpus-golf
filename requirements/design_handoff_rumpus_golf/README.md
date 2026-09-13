@@ -1,9 +1,17 @@
 # Handoff: Rumpus Golf — camera-based floor mini golf (UI + game flow)
 
 ## Overview
-Rumpus Golf turns any living-room floor into a mini golf course. A Kinect (v1 or v2) on a tripod watches the floor; players putt real colored balls through DIY courses built from books, cushions and shoeboxes. The app tracks the balls, counts strokes, detects hole-outs and keeps score on a laptop or TV.
+Rumpus Golf turns any living-room floor into a mini golf course. A Kinect (v1 or v2) — or a regular 2D webcam — on a tripod watches the floor; players putt real colored balls through DIY courses built from books, cushions and shoeboxes. The app tracks the balls, counts strokes, detects hole-outs and keeps score on a laptop or TV.
 
 This package documents the **complete screen flow (25 screens, "golden thread")**: boot → 5-step calibration → tee-off → gameplay HUD → turn change / hole-out / out-of-bounds → pause & corrections → scorecard → finish, plus Settings, Credits and Changelog. It complements `requirements/mini-golf-poc-requirements.md` (the engineering POC spec — sensor layer, CV pipeline, rules). Where this handoff and the POC spec disagree on scope, **this handoff extends** the spec (4 players, 1–9 holes, 3 course templates, gamepad, settings). CV/sensor architecture is unchanged.
+
+### Camera support
+The screens and behaviour are identical for every input. The prototype runs on a **Kinect (depth + color)** or a **regular 2D webcam (color only)**; the differences are internal (floor mapping and detection heuristics) and are documented in the POC spec §3.4. Two calibration steps read slightly differently on a webcam:
+
+- **S04 · Floor** — on a Kinect this averages depth and fits the floor plane; on a webcam it captures the empty-floor *color* reference used for later obstacle/cup differencing (no plane to fit).
+- **S05 · Play area** — on a Kinect the user draws a polygon directly on the floor; on a webcam the user clicks the **four corners of a known-size rectangle** (Small 2×1.5 / Medium 3×2 / Large 4×2.5 m) and the app solves a homography.
+
+Everything else — course, obstacles, cup, balls, gameplay — is the same flow. See `README.md` (repo root) and the POC spec for the limitations of a regular camera versus a Kinect.
 
 ## About the design files
 `design/Rumpus Golf Flow v2.dc.html` is a **design reference built in HTML** — a static artboard document (1920×1080 frames) showing intended look and behaviour. It is **not production code**. Recreate the screens in the target stack using its patterns; if no UI stack exists yet, the recommended choice (per the POC's portability rule) is **PySide6/QML** or a **locally-served browser UI** driven by the Python game loop over a websocket. Do not use WinForms/WPF.

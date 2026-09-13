@@ -4,9 +4,11 @@ _Revision 2 — adds user-placed physical obstacles with automatic footprint det
 
 ## 1. What this is
 
-A camera-based mini golf game played on a real floor. A depth camera (Microsoft Kinect) on a tripod watches a patch of floor. The player defines a play area, a start zone, and a hole zone on screen, then places real household objects (pillows, boxes, books, ramps) on the floor as obstacles; the app detects their footprints and draws them on the course map. Two players take turns putting real golf balls across the floor. The app tracks the balls, counts strokes, detects when a ball stops inside the hole zone, and keeps score.
+A camera-based mini golf game played on a real floor. A depth camera (Microsoft Kinect) or a regular 2D webcam on a tripod watches a patch of floor. The player defines a play area, a start zone, and a hole zone on screen, then places real household objects (pillows, boxes, books, ramps) on the floor as obstacles; the app detects their footprints and draws them on the course map. Two players take turns putting real golf balls across the floor. The app tracks the balls, counts strokes, detects when a ball stops inside the hole zone, and keeps score.
 
 The real world does the physics. Obstacles exist in software only so the course can be drawn, so a ball hidden behind a box is not reported as lost, and so setup feels finished. Approximate footprints are fine.
+
+The prototype runs on **either** a Kinect (depth + color) or a **regular 2D camera** (color only). The two share one sensor abstraction, one state machine, one UI and one set of rules; only the floor mapping and the detection heuristics differ. Color-only cameras are fully supported but carry limitations relative to a depth camera — see §3.4.
 
 There is no projector and nothing to print. All zones are defined and shown on the computer screen. The hole is a real plastic putting cup (a low ramp with a white ring opening, ~7 × 5.5 in, ~1 in tall) placed on the floor — the app detects it during setup to position the hole zone. The ball physically rolls up the cup's ramp and rests in it when holed.
 
@@ -20,6 +22,7 @@ There is no projector and nothing to print. All zones are defined and shown on t
 - Sensor drivers:
   - Kinect v1 (Xbox 360): libfreenect with its Python bindings.
   - Kinect v2 (Xbox One): libfreenect2 (Python bindings, e.g. pylibfreenect2).
+  - Regular 2D webcam: OpenCV `VideoCapture` (color only, no depth). Selected by index and resolution from Settings or the CLI.
 - UI: keep it simple and portable. OpenCV windows with mouse callbacks are acceptable for the POC. A lightweight cross-platform UI library (e.g. PySide6 or a browser-based UI served locally) is acceptable if it stays portable. Do not use WinForms/WPF.
 - Hardware target: must run at full speed on a mid-range laptop. Keep CPU use low. Design with a future low-power machine (used mini PC, possibly Raspberry Pi with Kinect v1) in mind: avoid heavy dependencies and avoid machine learning models. All tracking is classical computer vision.
 
@@ -30,27 +33,48 @@ There is no projector and nothing to print. All zones are defined and shown on t
 - All sensor access goes through one small module with a single interface. Game and vision code must never import the driver libraries directly.
 - The interface provides:
   - The latest color frame.
-  - The latest depth frame (distances in millimeters).
+  - The latest depth frame (distances in millimeters) — **optional**: a color-only backend reports `has_depth = False` and yields `depth = None`.
   - A sensor description: color resolution, depth resolution, field of view, reliable depth range (min/max), and sensor model name.
-- Two backends implement this interface:
+- Backends implement this interface:
   - `KinectV1Backend` (libfreenect). Build and test this one first — this is the sensor on hand.
   - `KinectV2Backend` (libfreenect2). Build second, against the already-fixed interface.
-- At startup the app detects which sensor is connected by USB vendor/product ID and loads the matching backend. If both are connected, prefer v2. If none, show a clear error.
+  - `WebcamBackend` (OpenCV `VideoCapture`). Color-only (`has_depth = False`), for any regular 2D camera.
+  - `MockBackend` (simulated floor) for development and smoke tests with no hardware.
+- At startup the app detects which sensor is connected by USB vendor/product ID and loads the matching backend. If both are connected, prefer v2. If none, try a webcam, then fall back to the mock. The decision can be overridden in Settings (Camera tab) or on the command line.
 - Known sensor facts to encode in the sensor descriptions:
   - Kinect v1: depth 640×480, color 640×480, ~57° horizontal field of view, reliable depth ~0.8 m to ~4.0 m. Unreliable in direct sunlight.
   - Kinect v2: depth 512×424, color 1920×1080, ~70° horizontal field of view, reliable depth ~0.5 m to ~4.5 m.
+  - Webcam: no depth (depth resolution 0×0), color resolution as requested (default 1280×720), field of view ~70°, no reliable depth range.
 
 ### 3.2 Coordinate mapping
 
 - All game logic works in floor coordinates (real-world meters on the floor plane), never in pixels.
-- Fit the floor plane from the depth data during calibration (RANSAC plane fit or equivalent — a simple, robust method that finds the dominant flat surface).
-- Provide functions to convert: depth pixel → 3D point → floor position, and floor position → color pixel (for drawing overlays).
-- The height of any object above the floor plane must be available (needed for ramps later; in the POC it is used to separate balls from the floor).
+- **Depth path (Kinect)**: fit the floor plane from the depth data during calibration (RANSAC plane fit or equivalent — a simple, robust method that finds the dominant flat surface). Provide functions to convert: depth pixel → 3D point → floor position, and floor position → color pixel (for drawing overlays).
+- **Color-only path (webcam)**: there is no plane to fit. Instead the user clicks the four corners of a known-size rectangle (Small 2×1.5 / Medium 3×2 / Large 4×2.5 m presets) and the app solves a 2D homography `H` that maps floor meters to pixels (and back). The same floor-facing methods (`floor_to_pixel`, `pixel_to_floor`, `radius_to_pixels`) are provided by a `HomographyMapper` so game/vision code never branches on the source.
+- The height of any object above the floor plane must be available (needed for ramps later; in the POC it is used to separate balls from the floor). This is available **only on the depth path**; a color-only camera has no height information.
 
 ### 3.3 Configuration persistence
 
 - Save calibration and setup to a config file on disk (JSON). Includes: play area polygon, start zone, hole zone, obstacle polygons (4.1b), floor plane, ball color definitions, player names.
 - On startup, offer to load the saved setup or start a new calibration.
+- The saved setup records which mapping was used (fitted plane vs. homography) so a webcam-calibrated course reloads correctly.
+
+### 3.4 Color-only camera — differences and limitations
+
+A regular 2D camera replaces depth with color heuristics. The game, states, UI and rules are identical; only these internals change, and only the depth camera gets the full robustness described in §4.
+
+| Concern | Kinect (depth + color) | Regular 2D webcam (color only) |
+|---|---|---|
+| Floor mapping | Automatic plane fit (RANSAC) from depth | Homography from 4 clicked corners of a **known-size rectangle**; assumes a flat floor and a single plane |
+| Floor reference | Depth snapshot; height is absolute | Empty-floor **color** snapshot, differenced against later frames |
+| Ball detection | Depth-first (any small above-floor blob) + color identity | **Hue mask only** — the ball must be a saturated, distinct color that does not appear elsewhere on the floor |
+| Obstacle detection | Height above the floor; works for any object, including a dark object on a dark floor | Frame differencing — needs visual contrast; a dark object on a dark floor, or a flat mat, may be missed |
+| Cup detection | Height + white-ring color | White-ring color + differencing; needs a clearly visible ring against the floor |
+| Lighting | Robust — depth is largely light-independent | Sensitive — shadows, sunlight and auto-exposure/white-balance drift can create false obstacles |
+| Height / ramps | Ball height is a secondary holed check on v2 | No height — a ball on a raised ramp maps to a slightly wrong floor position |
+| Setup accuracy | Automatic | Depends on how carefully the four corners are clicked |
+
+Practical guidance: use a Kinect if available. A webcam is playable but wants a plain, evenly-lit floor and balls/obstacles that contrast strongly with it. These differences are deliberately contained — the `has_depth` flag on the backend is the only branching point the rest of the code sees.
 
 ## 4. Functional requirements
 
@@ -171,7 +195,7 @@ Each step is independently runnable and testable before the next begins.
 
 ## 8. Design note — future tablet edition
 
-A later version will run on a tablet without a depth camera, using an AR (augmented reality — the tablet's camera plus motion sensors) scan of the floor instead of the Kinect depth snapshot. To keep that port cheap:
+A later version will run on a tablet without a depth camera, using an AR (augmented reality — the tablet's camera plus motion sensors) scan of the floor instead of the Kinect depth snapshot. The **color-only webcam path (§3.4) already exercises this shape**: a 2D camera, no depth, homography mapping, and color-based detection. To keep that port cheap:
 
 - Obstacle detection lives behind the sensor layer (3.1), like everything else. The rest of the app only ever sees "a list of proposed footprint polygons in floor coordinates." The tablet edition swaps the depth-snapshot detector for an AR-based one and changes nothing above it.
 - The correction interactions (select, delete, reshape, add, re-detect, confirm, undo), the config format (obstacles as floor-plane polygons next to the zones), the "stopped, hidden" occlusion rule and the game rules must be reusable unchanged. Do not let Kinect-specific details (pixel coordinates, depth units, frame counts) leak into them.

@@ -11,6 +11,7 @@ The UI is a dumb display: it sends user intent, never game state.
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -28,8 +29,9 @@ from .sensor.mock import MockBackend, hex_to_bgr
 from .setup_data import Setup
 from .vision.ball_tracker import BallTracker
 from .vision.floor import fit_floor_plane
-from .vision.geometry import CameraModel, FloorMapper, default_camera
-from .vision.obstacle_detect import detect_obstacles, point_in_polygon
+from .vision.geometry import (CameraModel, FloorMapper, HomographyMapper,
+                              default_camera, homography_from_corners)
+from .vision.obstacle_detect import detect_obstacles, detect_obstacles_color, point_in_polygon
 
 
 class S:
@@ -93,6 +95,19 @@ class GameEngine:
         self.tracker = BallTracker()
         self.events = EventLog()
 
+        # Color-only support (regular 2D webcam): reference frame for obstacle
+        # differencing and a homography mapper established during calibration.
+        self.reference_color: np.ndarray | None = None
+        self._avg_color: np.ndarray | None = None
+        self._avg_color_count: float = 0.0
+        self._preset_w = 3.0
+        self._preset_h = 2.0
+
+        # Camera enumeration (for the Settings → Camera tab).
+        self._camera_list: list[dict] = []
+        self._camera_scan_done = False
+        threading.Thread(target=self._scan_cameras, daemon=True).start()
+
         # Game round state.
         self.players: list[Player] = []
         self.player_scores: dict[str, list[int | None]] = {}
@@ -144,6 +159,7 @@ class GameEngine:
 
         # Settings return-state.
         self._settings_return: str = S.BOOT
+        self._settings_tab = "display"     # display | rules | players | camera | about
         self._pause_focus = 0
         self._recal_flyout = False
         self._rebuilding = False
@@ -170,6 +186,74 @@ class GameEngine:
     def is_mock(self) -> bool:
         return isinstance(self.backend, MockBackend)
 
+    @property
+    def is_color_only(self) -> bool:
+        """True when the attached source has no depth (regular 2D webcam)."""
+        return self.backend is not None and not getattr(self.backend, "has_depth", True)
+
+    def _scan_cameras(self) -> None:
+        try:
+            from .sensor.detect import list_webcams
+            self._camera_list = list_webcams()
+        except Exception:
+            self._camera_list = []
+        self._camera_scan_done = True
+
+    def rescan_cameras(self) -> None:
+        self._camera_scan_done = False
+        threading.Thread(target=self._scan_cameras, daemon=True).start()
+
+    def grab_frame(self):
+        """Return the latest backend frame (or None). The server loop calls this
+        instead of holding its own backend reference so the engine can hot-swap
+        the camera from the Settings screen."""
+        if self.backend is None:
+            return None
+        try:
+            return self.backend.grab()
+        except Exception:
+            return None
+
+    def _reconfigure_camera(self) -> None:
+        """Close the current backend and reopen per the persisted camera settings."""
+        from .sensor import create_backend
+        cfg = self.settings.get("camera", default={}) or {}
+        mode = str(cfg.get("backend", "auto"))
+        index = int(cfg.get("device", 0))
+        res = str(cfg.get("resolution", "1280x720"))
+
+        if self.backend is not None:
+            try:
+                self.backend.close()
+            except Exception:
+                pass
+
+        # Never fall back to the mock during an explicit Settings change.
+        backend, _kind = create_backend(
+            force=None, allow_mock=False,
+            camera_index=index, camera_res=res, backend_mode=mode,
+        )
+
+        self.plane = None
+        self.mapper = None
+        self.reference_depth = None
+        self.reference_color = None
+        self._draw_poly = []
+
+        if backend is None:
+            self.backend = None
+            self.sensor_status = "none"
+            self.sensor_desc = None
+        else:
+            cam = getattr(backend, "cam", None) or default_camera(
+                backend.description.depth_res if backend.description.depth_res != (0, 0)
+                else backend.description.color_res
+            )
+            self.attach_backend(backend, cam)
+            self.sensor_status = backend.description.model
+        self.setup = Setup()
+        self._set_state(S.SENSOR_CHECK)
+
     # ===================================================================== #
     # Main loop
     # ===================================================================== #
@@ -194,6 +278,16 @@ class GameEngine:
         self._process_timers(now)
 
     def _process_vision(self, now: float) -> None:
+        if self.is_color_only:
+            # Color-only: capture reference/live color, track balls by hue.
+            if now < self._capture_until:
+                self._accumulate_color(self._frame_color)
+            if self.state in (S.PLAY, S.TURN_CHANGE, S.HOLE_OUT, S.OOB):
+                if self.mapper is not None:
+                    self.tracker.update(self._frame_color, None, self.mapper,
+                                        self.cam, self.plane, self._confirmed_obstacles(), now)
+                    self._apply_ball_motion(now)
+            return
         if self._frame_depth is None:
             return
         # Accumulate depth while a capture is active.
@@ -225,6 +319,29 @@ class GameEngine:
         else:
             self._avg_depth += np.where(valid, d, 0.0)
             self._avg_count += valid.astype(np.float32)
+
+    def _accumulate_color(self, color) -> None:
+        if color is None:
+            return
+        c = color.astype(np.float32)
+        if self._avg_color is None:
+            self._avg_color = c.copy()
+            self._avg_color_count = 1.0
+        else:
+            self._avg_color += c
+            self._avg_color_count += 1.0
+
+    def _finish_capture_color(self) -> np.ndarray | None:
+        if self._avg_color is None or self._avg_color_count <= 0:
+            self._avg_color = None
+            self._avg_color_count = 0.0
+            self._capture_until = 0.0
+            return None
+        avg = (self._avg_color / max(self._avg_color_count, 1.0)).astype(np.uint8)
+        self._avg_color = None
+        self._avg_color_count = 0.0
+        self._capture_until = 0.0
+        return avg
 
     def _finish_capture(self) -> np.ndarray | None:
         if self._avg_depth is None or self._avg_count is None:
@@ -345,8 +462,7 @@ class GameEngine:
         elif st == S.GAME_FINISH:
             self._finish_action(action)
         elif st == S.SETTINGS:
-            if action == "back":
-                self._set_state(self._settings_return)
+            self._settings_action(action, msg)
         elif st in (S.CREDITS, S.CHANGELOG):
             if action == "back":
                 self._set_state(S.SETTINGS)
@@ -420,6 +536,16 @@ class GameEngine:
             self._set_state(S.SENSOR_CHECK)
 
     def _on_capture_done(self) -> None:
+        if self.is_color_only:
+            avg_color = self._finish_capture_color()
+            if self._capture_label == "floor" and avg_color is not None:
+                self.reference_color = avg_color
+                self._set_state(S.CAL_AREA)
+            elif self._capture_label == "obstacles" and avg_color is not None and self.mapper is not None:
+                self._propose_obstacles_color(avg_color)
+            elif self._capture_label == "cup" and avg_color is not None and self.mapper is not None:
+                self._propose_cup_color(avg_color)
+            return
         avg = self._finish_capture()
         if self._capture_label == "floor" and avg is not None:
             plane = fit_floor_plane(avg, self.cam)
@@ -445,15 +571,36 @@ class GameEngine:
         elif action == "clear":
             self._draw_poly = []
         elif action == "confirm":
-            if len(self.setup.play_area) >= 3:
+            if self.is_color_only:
+                if len(self._draw_poly) == 4:
+                    self._build_homography()
+            elif len(self.setup.play_area) >= 3:
                 self._set_state(S.CAL_COURSE)
 
     def _apply_preset(self, name: str) -> None:
         sizes = {"small": (2.0, 1.5), "medium": (3.0, 2.0), "large": (4.0, 2.5)}
         w, h = sizes.get(name, (3.0, 2.0))
+        self._preset_w, self._preset_h = w, h
         self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
         self.setup.start = CircleZone(0.0, 0.0, 0.15)
         self._draw_poly = []
+
+    def _build_homography(self) -> None:
+        """Solve the pixel->floor homography from the four clicked corners."""
+        if len(self._draw_poly) != 4:
+            return
+        pixels = [(nx * self._feed_w, ny * self._feed_h) for nx, ny in self._draw_poly]
+        H = homography_from_corners(pixels, self._preset_w, self._preset_h)
+        if H is None:
+            return
+        w, h = self._preset_w, self._preset_h
+        self.mapper = HomographyMapper(H)
+        self.plane = None
+        self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
+        self.setup.start = CircleZone(0.0, 0.0, 0.15)
+        self.setup.camera = {"mode": "homography", "w": w, "h": h, "H": H.tolist()}
+        self.setup.floor_plane = None
+        self._set_state(S.CAL_COURSE)
 
     def _course_action(self, action: str, msg: dict) -> None:
         if action == "select":
@@ -493,6 +640,22 @@ class GameEngine:
         confirmed = [o for o in self.setup.obstacles if o.state == "confirmed"]
         new_obs: list[Obstacle] = list(confirmed)
         for i, p in enumerate(proposals):
+            label = self._match_template_label(p["polygon"]) or f"Object {len(new_obs) + 1}"
+            new_obs.append(Obstacle(
+                id=f"ob{len(new_obs)}", label=label, kind=p["kind"],
+                polygon=p["polygon"], state="proposed", confidence=p["confidence"]))
+        self.setup.obstacles = new_obs
+        self._set_state(S.CAL_OBSTACLES)
+
+    def _propose_obstacles_color(self, avg_color: np.ndarray) -> None:
+        if self.mapper is None:
+            return
+        cup = (self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) if self.setup.hole else None
+        proposals = detect_obstacles_color(self.reference_color, avg_color, self.mapper,
+                                           self.setup.play_area, cup)
+        confirmed = [o for o in self.setup.obstacles if o.state == "confirmed"]
+        new_obs: list[Obstacle] = list(confirmed)
+        for p in proposals:
             label = self._match_template_label(p["polygon"]) or f"Object {len(new_obs) + 1}"
             new_obs.append(Obstacle(
                 id=f"ob{len(new_obs)}", label=label, kind=p["kind"],
@@ -599,6 +762,26 @@ class GameEngine:
         if best is not None:
             self.setup.hole = CircleZone(best[0], best[1], 0.045)
 
+    def _propose_cup_color(self, avg_color: np.ndarray) -> None:
+        # Color-only: the cup is a small new region vs. the empty-floor reference.
+        if self.mapper is None:
+            return
+        proposals = detect_obstacles_color(self.reference_color, avg_color, self.mapper,
+                                           self.setup.play_area, None,
+                                           min_area_px=80)
+        best = None
+        best_d = 1e9
+        target = self.layout.hole if self.layout else None
+        for p in proposals:
+            cx = sum(q[0] for q in p["polygon"]) / max(1, len(p["polygon"]))
+            cy = sum(q[1] for q in p["polygon"]) / max(1, len(p["polygon"]))
+            d = np.hypot(cx - target[0], cy - target[1]) if target else 0.0
+            if d < best_d:
+                best_d = d
+                best = (cx, cy)
+        if best is not None:
+            self.setup.hole = CircleZone(best[0], best[1], 0.045)
+
     def _balls_action(self, action: str) -> None:
         if action == "confirm":
             self._set_state(S.GAME_START)
@@ -660,6 +843,20 @@ class GameEngine:
         elif action == "back":
             self._set_state(S.PAUSE)
 
+    def _settings_action(self, action: str, msg: dict) -> None:
+        if action == "back":
+            self._set_state(self._settings_return)
+        elif action == "settings-tab":
+            tabs = ["display", "rules", "players", "camera", "about"]
+            idx = int(msg.get("index", 0))
+            self._settings_tab = tabs[idx] if 0 <= idx < len(tabs) else "display"
+        elif action == "credits":
+            self._set_state(S.CREDITS)
+        elif action == "changelog":
+            self._set_state(S.CHANGELOG)
+        elif action == "refresh_cameras":
+            self.rescan_cameras()
+
     def _holecomplete_action(self, action: str) -> None:
         if action == "confirm":
             if self.hole >= self.holes:
@@ -704,16 +901,25 @@ class GameEngine:
             return None
         px = nx * self._feed_w
         py = ny * self._feed_h
-        # Prefer depth; fall back to ray intersection.
-        if self._frame_depth is not None:
+        # Prefer depth; fall back to ray/homography intersection.
+        if self._frame_depth is not None and not self.is_color_only:
             x = int(np.clip(px, 0, self._feed_w - 1))
             y = int(np.clip(py, 0, self._feed_h - 1))
             z = float(self._frame_depth[y, x])
             if z > 200:
                 return self.mapper.depth_pixel_to_floor(px, py, z)
-        return self.mapper.pixel_ray_to_floor(px, py)
+        return self.mapper.pixel_to_floor(px, py)
 
     def _pointer_area(self, ptype: str, nx: float, ny: float) -> None:
+        if self.is_color_only:
+            # Store normalized pixel corners; the homography is solved on confirm.
+            if ptype == "down":
+                if len(self._draw_poly) < 4:
+                    self._draw_poly.append((nx, ny))
+            elif ptype == "move":
+                if self._draw_poly:
+                    self._draw_poly[-1] = (nx, ny)
+            return
         f = self._feed_to_floor(nx, ny)
         if f is None:
             return
@@ -800,6 +1006,32 @@ class GameEngine:
             pid = msg.get("player_id")
             delta = int(msg.get("delta", 0))
             self._adjust_score(pid, delta)
+        elif key == "settings.rules.holes":
+            self.holes = max(1, min(9, int(val)))
+            self.settings.set(self.holes, "rules", "holes")
+            self.settings.save()
+        elif key == "settings.rules.strokeCap":
+            self.stroke_cap = max(3, min(12, int(val)))
+            self.settings.set(self.stroke_cap, "rules", "strokeCap")
+            self.settings.save()
+        elif key == "settings.rules.oobPenalty":
+            self.settings.set(bool(val), "rules", "oobPenalty")
+            self.settings.save()
+        elif key == "settings.rules.tunnelBonus":
+            self.settings.set(bool(val), "rules", "tunnelBonus")
+            self.settings.save()
+        elif key == "settings.camera.device":
+            self.settings.set(int(val), "camera", "device")
+            self.settings.save()
+            self._reconfigure_camera()
+        elif key == "settings.camera.resolution":
+            self.settings.set(str(val), "camera", "resolution")
+            self.settings.save()
+            self._reconfigure_camera()
+        elif key == "settings.camera.backend":
+            self.settings.set(str(val), "camera", "backend")
+            self.settings.save()
+            self._reconfigure_camera()
         elif key.startswith("settings."):
             path = key.split(".")[1:]
             self.settings.set(val, *path)
@@ -924,7 +1156,12 @@ class GameEngine:
     # Game rules
     # ===================================================================== #
     def _apply_saved_setup(self) -> None:
-        if self.setup.floor_plane is not None:
+        cam_cfg = self.setup.camera
+        if cam_cfg and cam_cfg.get("mode") == "homography" and cam_cfg.get("H"):
+            H = np.array(cam_cfg["H"], dtype=float).reshape(3, 3)
+            self.mapper = HomographyMapper(H)
+            self.plane = None
+        elif self.setup.floor_plane is not None:
             self.plane = self.setup.floor_plane
             cam = self.setup.camera
             self.cam = CameraModel(fx=cam.get("fx", self.cam.fx), fy=cam.get("fy", self.cam.fy),
@@ -1086,7 +1323,8 @@ class GameEngine:
                 return
         # Out of bounds?
         if self.setup.play_area and not point_in_polygon(pos[0], pos[1], self.setup.play_area):
-            self._set_strokes(p.id, self._current_strokes(p.id) + 1)  # penalty
+            if self.settings.get("rules", "oobPenalty", default=True):
+                self._set_strokes(p.id, self._current_strokes(p.id) + 1)  # penalty
             self.events.append(EventType.OOB, p.id, self.hole)
             self._set_state(S.OOB)
             return
@@ -1232,12 +1470,25 @@ class GameEngine:
         if st == S.GAME_FINISH:
             return self._finish_snapshot()
         if st == S.SETTINGS:
-            return {"return": self._settings_return}
+            return {"return": self._settings_return, "tab": self._settings_tab,
+                    "camera": self._camera_snapshot()}
         if st == S.CREDITS:
             return {}
         if st == S.CHANGELOG:
             return {"changelog": self._changelog()}
         return {}
+
+    def _camera_snapshot(self) -> dict:
+        cfg = self.settings.get("camera", default={}) or {}
+        return {
+            "devices": self._camera_list,
+            "scanning": not self._camera_scan_done,
+            "active_device": int(cfg.get("device", 0)),
+            "resolution": str(cfg.get("resolution", "1280x720")),
+            "backend": str(cfg.get("backend", "auto")),
+            "is_color_only": self.is_color_only,
+            "sensor_status": self.sensor_status,
+        }
 
     # -- sub-snapshots ---------------------------------------------------- #
     def _courses_snapshot(self) -> list[dict]:
@@ -1393,6 +1644,13 @@ class GameEngine:
 
     def _overlay_snapshot(self) -> dict:
         o = {"shapes": []}
+        # Color-only calibration: show clicked corners before a homography exists.
+        if self.is_color_only and self.state == S.CAL_AREA and self.mapper is None and self._draw_poly:
+            for i, (nx, ny) in enumerate(self._draw_poly):
+                o["shapes"].append({"type": "circle", "x": nx, "y": ny, "r": 0.012,
+                                    "fill": "#8be9c3", "stroke": "#15171c", "stroke_width": 2,
+                                    "label": str(i + 1), "id": f"corner{i}"})
+            return o
         if self.mapper is None:
             return o
         st = self.state
@@ -1404,14 +1662,14 @@ class GameEngine:
         # Start.
         if self.setup.start is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.start.x, self.setup.start.y)
-            ru = self.setup.start.r * self.cam.fx / (self._depth_at_floor(self.setup.start.x, self.setup.start.y) / 1000.0)
+            ru = self.mapper.radius_to_pixels(self.setup.start.x, self.setup.start.y, self.setup.start.r)
             o["shapes"].append({"type": "circle", "x": u / self._feed_w, "y": v / self._feed_h,
                                 "r": ru / self._feed_w, "stroke": "#f2efe8", "stroke_width": 3,
                                 "fill": "none", "label": "START", "id": "start"})
         # Hole.
         if self.setup.hole is not None:
             u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y)
-            ru = self.setup.hole.r * self.cam.fx / (self._depth_at_floor(self.setup.hole.x, self.setup.hole.y) / 1000.0)
+            ru = self.mapper.radius_to_pixels(self.setup.hole.x, self.setup.hole.y, self.setup.hole.r)
             o["shapes"].append({"type": "circle", "x": u / self._feed_w, "y": v / self._feed_h,
                                 "r": ru / self._feed_w, "stroke": "#8be9c3", "stroke_width": 4,
                                 "fill": "rgba(139,233,195,0.25)", "label": None, "id": "hole"})

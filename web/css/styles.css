@@ -247,6 +247,14 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 800; }
   background: var(--text); box-shadow: 0 4px 12px rgba(0,0,0,.4); cursor: pointer;
 }
 
+/* ---- select (settings dropdowns) ---- */
+.select {
+  appearance: none; border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--panel-2); color: var(--text); font: 600 20px var(--font-body);
+  padding: 14px 18px; cursor: pointer; min-width: 0;
+}
+.select option { background: var(--panel); color: var(--text); }
+
 /* ---- player colors ---- */
 .dot { border-radius: 50%; display: inline-block; flex: none; }
 .c-orange { color: var(--orange); }

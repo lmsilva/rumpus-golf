@@ -52,34 +52,40 @@ class Broadcaster:
             return self.seq, self.state_json, self.frame
 
 
-def make_app(force_sensor: str | None = None, allow_mock: bool = True) -> FastAPI:
+def make_app(force_sensor: str | None = None, allow_mock: bool = True,
+             camera_index: int | None = None, camera_res: str | None = None,
+             backend_mode: str | None = None) -> FastAPI:
     engine = GameEngine()
     broadcaster = Broadcaster()
     input_queue: queue.Queue = queue.Queue()
     stop = threading.Event()
-    backend = None
-    backend_kind = "none"
 
     def init_sensor() -> None:
-        nonlocal backend, backend_kind
-        backend, backend_kind = create_backend(force=force_sensor, allow_mock=allow_mock)
+        cfg = engine.settings.get("camera", default={}) or {}
+        idx = camera_index if camera_index is not None else int(cfg.get("device", 0))
+        res = camera_res if camera_res is not None else str(cfg.get("resolution", "1280x720"))
+        mode = backend_mode if backend_mode is not None else str(cfg.get("backend", "auto"))
+        backend, _kind = create_backend(
+            force=force_sensor, allow_mock=allow_mock,
+            camera_index=idx, camera_res=res, backend_mode=mode,
+        )
         if backend is None:
+            engine.sensor_status = "none"
             return
-        cam = getattr(backend, "cam", None) or default_camera(backend.description.depth_res)
+        cam = getattr(backend, "cam", None) or default_camera(
+            backend.description.depth_res if backend.description.depth_res != (0, 0)
+            else backend.description.color_res
+        )
         engine.attach_backend(backend, cam)
 
     def loop() -> None:
         init_sensor()
-        if backend is None:
-            engine.sensor_status = "none"
-            broadcaster.publish(engine.snapshot(), None)
-            while not stop.is_set():
-                time.sleep(0.1)
-            return
-        interval = 1.0 / max(10.0, min(30.0, float(backend.description.fps)))
         while not stop.is_set():
-            t0 = time.time()
-            frame = backend.grab()
+            frame = engine.grab_frame()
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            interval = 1.0 / max(10.0, min(30.0, float(engine.backend.description.fps))) if engine.backend else 0.1
             engine.tick(frame)
             while True:  # drain user input (engine access stays single-threaded)
                 try:
@@ -91,9 +97,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True) -> FastAP
             else:
                 jpeg = None
             broadcaster.publish(engine.snapshot(), jpeg)
-            dt = time.time() - t0
-            if dt < interval:
-                time.sleep(interval - dt)
+            time.sleep(interval)
 
     thread = threading.Thread(target=loop, daemon=True)
 
@@ -131,7 +135,10 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True) -> FastAP
 
 
 def run(host: str = "127.0.0.1", port: int = 8000, force_sensor: str | None = None,
-        allow_mock: bool = True) -> None:
+        allow_mock: bool = True, camera_index: int | None = None,
+        camera_res: str | None = None, backend_mode: str | None = None) -> None:
     import uvicorn
-    uvicorn.run(make_app(force_sensor=force_sensor, allow_mock=allow_mock),
+    uvicorn.run(make_app(force_sensor=force_sensor, allow_mock=allow_mock,
+                         camera_index=camera_index, camera_res=camera_res,
+                         backend_mode=backend_mode),
                 host=host, port=port, log_level="info")

@@ -25,6 +25,7 @@ DEFAULTS: dict[str, Any] = {
     "sfx": {"enabled": True, "volume": 0.8, "announcer": True},
     "controller": {"rumble": True},
     "display": {"showCameraFeed": True},
+    "camera": {"device": 0, "resolution": "1280x720", "backend": "auto"},
     "rules": {"holes": 3, "strokeCap": 8, "oobPenalty": True, "tunnelBonus": True},
 }
 
@@ -93,3 +94,15 @@ class Settings:
     @property
     def theme(self) -> str:
         return str(self.get("theme", default="dark"))
+
+    @property
+    def camera_device(self) -> int:
+        return int(self.get("camera", "device", default=0))
+
+    @property
+    def camera_resolution(self) -> str:
+        return str(self.get("camera", "resolution", default="1280x720"))
+
+    @property
+    def camera_backend(self) -> str:
+        return str(self.get("camera", "backend", default="auto"))

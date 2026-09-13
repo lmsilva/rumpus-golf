@@ -56,6 +56,8 @@ window.RG = window.RG || {};
   }
 
   function signature(st) {
+    // Settings re-renders when the tab changes or the camera scan finishes.
+    if (st.screen === "S19") return `${st.ui && st.ui.tab}|${st.ui && st.ui.camera && st.ui.camera.scanning}`;
     // Rebuild HUD only when meaningful text changes (avoid per-frame flicker).
     if (st.screen !== "S11") return "";
     const g = st.game || {};
@@ -78,7 +80,6 @@ window.RG = window.RG || {};
     scene.querySelectorAll("[data-action]").forEach((el) => {
       el.addEventListener("click", (e) => {
         const a = el.getAttribute("data-action");
-        if (a === "settings-tab") return;
         RG.audio.sfx(a === "confirm" ? "confirm" : "click");
         const msg = { t: "action", a };
         if (el.hasAttribute("data-index")) msg.index = parseInt(el.getAttribute("data-index"), 10);
@@ -112,6 +113,24 @@ window.RG = window.RG || {};
       el.addEventListener("input", () => RG.send({ t: "set", key: "settings.music.volume", value: parseInt(el.value, 10) / 100 })));
     scene.querySelectorAll("[data-set-sfxvol]").forEach((el) =>
       el.addEventListener("input", () => RG.send({ t: "set", key: "settings.sfx.volume", value: parseInt(el.value, 10) / 100 })));
+
+    // Settings → Game rules
+    scene.querySelectorAll("[data-set-rule-holes]").forEach((el) =>
+      el.addEventListener("click", () => RG.send({ t: "set", key: "settings.rules.holes", value: parseInt(el.getAttribute("data-set-rule-holes"), 10) })));
+    scene.querySelectorAll("[data-set-rule-cap]").forEach((el) =>
+      el.addEventListener("click", () => RG.send({ t: "set", key: "settings.rules.strokeCap", value: parseInt(el.getAttribute("data-set-rule-cap"), 10) })));
+    scene.querySelectorAll("[data-set-rule-oob]").forEach((el) =>
+      el.addEventListener("click", () => RG.send({ t: "set", key: "settings.rules.oobPenalty", value: !(RG.settings && RG.settings.rules && RG.settings.rules.oobPenalty) })));
+    scene.querySelectorAll("[data-set-rule-tunnel]").forEach((el) =>
+      el.addEventListener("click", () => RG.send({ t: "set", key: "settings.rules.tunnelBonus", value: !(RG.settings && RG.settings.rules && RG.settings.rules.tunnelBonus) })));
+
+    // Settings → Camera
+    scene.querySelectorAll("[data-set-camera-device]").forEach((el) =>
+      el.addEventListener("change", () => RG.send({ t: "set", key: "settings.camera.device", value: parseInt(el.value, 10) })));
+    scene.querySelectorAll("[data-set-camera-resolution]").forEach((el) =>
+      el.addEventListener("change", () => RG.send({ t: "set", key: "settings.camera.resolution", value: el.value })));
+    scene.querySelectorAll("[data-set-camera-backend]").forEach((el) =>
+      el.addEventListener("change", () => RG.send({ t: "set", key: "settings.camera.backend", value: el.value })));
 
     scene.querySelectorAll("input[data-text]").forEach((el) => {
       const key = el.getAttribute("data-text");

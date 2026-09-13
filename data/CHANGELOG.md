@@ -1,6 +1,13 @@
 # Changelog
 Rendered on the "What's new" screen (S21). Newest first. Line prefixes: `new:`, `improved:`, `fixed:`. If this file has no releases, hide the "What's new" entry in Settings.
 
+## v0.4.0 — 2026-09-12 · Latest
+- new: Regular 2D webcam support — no Kinect required. The floor is mapped with a 4-corner homography instead of a depth plane.
+- new: Color-only tracking — balls by hue mask, obstacles and the cup by frame differencing against an empty-floor reference.
+- new: Settings — Camera tab (device, resolution, backend), Game rules tab (holes, stroke cap, OOB penalty, tunnel bonus), Players and About tabs.
+- improved: Settings is now tabbed; Credits and What's new are reachable from the About tab and the side rail.
+- fixed: Out-of-bounds penalty can be toggled from Settings.
+
 ## v0.3.0 — 2026-09-12 · Latest
 - new: Obstacles — scan the floor, confirm / delete / reshape footprints, draw missed ones; balls behind them read "hidden", not lost; mid-game add/ignore prompt.
 - new: Xbox controller support with on-screen glyph hints; keyboard hints return when the pad disconnects.

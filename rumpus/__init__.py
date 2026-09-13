@@ -9,4 +9,4 @@ The seam is deliberate: everything above the sensor layer is sensor-agnostic so
 a future tablet/AR edition can swap only the detector (see requirements).
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

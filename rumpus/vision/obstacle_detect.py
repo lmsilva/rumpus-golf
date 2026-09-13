@@ -14,7 +14,8 @@ import numpy as np
 
 from ..models import CameraModel, FloorPlane
 from ..vision.blobs import (above_floor_mask, connected_regions, contour_to_floor,
-                            height_map, largest_contour, simplify_polygon)
+                            contour_to_floor_pixels, height_map, largest_contour,
+                            simplify_polygon)
 from ..vision.geometry import FloorMapper
 
 
@@ -87,6 +88,69 @@ def detect_obstacles(
             "polygon": floor_poly,
             "confidence": round(conf, 2),
             "area_m2": round(area_m2, 3),
+            "kind": "soft",
+        })
+    return proposals
+
+
+def detect_obstacles_color(
+    reference_bgr,
+    live_bgr,
+    mapper: FloorMapper,
+    play_area: list[tuple[float, float]],
+    cup: tuple[float, float, float] | None = None,   # (x, y, r) meters
+    min_area_px: int = 300,
+    diff_thresh: int = 30,
+) -> list[dict]:
+    """Detect new static objects on a color-only feed by frame differencing.
+
+    ``reference_bgr`` is the empty-floor snapshot; ``live_bgr`` is the current
+    frame (averaged over the scan window). Anything that appeared since the
+    reference is proposed as an obstacle. Returns {polygon, confidence, kind}.
+    """
+    import cv2
+    if reference_bgr is None or live_bgr is None:
+        return []
+    if reference_bgr.shape != live_bgr.shape:
+        return []
+    ref = cv2.cvtColor(reference_bgr, cv2.COLOR_BGR2GRAY)
+    liv = cv2.cvtColor(live_bgr, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(liv, ref)
+    _, mask = cv2.threshold(diff, diff_thresh, 255, cv2.THRESH_BINARY)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    regions = connected_regions(mask, min_area=min_area_px)
+    proposals: list[dict] = []
+    for r in regions:
+        cx, cy = r["center"]
+        f = mapper.pixel_to_floor(float(cx), float(cy))
+        if f is None:
+            continue
+        fx, fy = f
+
+        # Exclude the cup (already known).
+        if cup is not None:
+            if np.hypot(fx - cup[0], fy - cup[1]) < cup[2] + 0.12:
+                continue
+
+        # Require the region to sit inside the play area.
+        if play_area and not point_in_polygon(fx, fy, play_area):
+            continue
+
+        contour = largest_contour(r["mask"])
+        if contour is None:
+            continue
+        simple = simplify_polygon(contour, target_points=8)
+        if len(simple) < 3:
+            continue
+        floor_poly = contour_to_floor_pixels(np.array(simple, dtype=np.int32), mapper)
+        if len(floor_poly) < 3:
+            continue
+
+        proposals.append({
+            "polygon": floor_poly,
+            "confidence": 1.0,
+            "area_m2": 0.0,
             "kind": "soft",
         })
     return proposals

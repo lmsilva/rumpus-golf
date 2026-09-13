@@ -1,9 +1,9 @@
 # Rumpus Golf
 
-Turn any living-room floor into a mini golf course. A Kinect (v1 or v2) on a
-tripod watches the floor; players putt real colored balls through DIY courses
-built from books, cushions and shoeboxes. The app tracks the balls, counts
-strokes, detects hole-outs and keeps score on a laptop or TV.
+Turn any living-room floor into a mini golf course. A Kinect (v1 or v2) or a
+regular webcam on a tripod watches the floor; players putt real colored balls
+through DIY courses built from books, cushions and shoeboxes. The app tracks
+the balls, counts strokes, detects hole-outs and keeps score on a laptop or TV.
 
 This is a **prototype** implementing the full design handoff
 (`requirements/design_handoff_rumpus_golf/`) and the POC spec
@@ -23,7 +23,7 @@ Python core portable (Windows → Linux → future tablet/AR edition).
 ┌─────────────── browser (web/) ───────────────┐      ┌────────── Python (rumpus/) ──────────┐
 │  screens.js   HTML/CSS/JS renderers           │      │  engine.py    state machine + rules  │
 │  feed.js      JPEG canvas + SVG overlay       │◄────►│  vision/      floor/ball/obstacle CV │
-│  audio.js     WebAudio SFX + music            │  ws  │  sensor/      Kinect v1/v2/mock      │
+│  audio.js     WebAudio SFX + music            │  ws  │  sensor/      Kinect v1/v2/webcam/mock │
 │  main.js      websocket client + input        │      │  game/        course/scoring/events  │
 └───────────────────────────────────────────────┘      └──────────────────────────────────────┘
 ```
@@ -32,11 +32,14 @@ Python core portable (Windows → Linux → future tablet/AR edition).
   snapshot + JPEG feed frames; the browser renders and sends back user intent
   (`action`, `pointer`, `set`, `text`). The browser never holds game state.
 - **Sensor abstraction** (`rumpus/sensor/`). Game/vision code never imports a
-  driver. `SensorBackend` exposes color + depth + a `SensorDescription`, and
-  three backends implement it: `KinectV1Backend` (libfreenect),
-  `KinectV2Backend` (pylibfreenect2), and `MockBackend` (simulated floor).
+  driver. `SensorBackend` exposes color (+ optional depth) + a
+  `SensorDescription`, and four backends implement it: `KinectV1Backend`
+  (libfreenect), `KinectV2Backend` (pylibfreenect2), `WebcamBackend` (regular
+  2D camera, color-only) and `MockBackend` (simulated floor).
 - **Coordinate mapping** (`rumpus/vision/geometry.py`). All game logic is in
-  floor meters; pixel↔3D↔floor conversion lives in one `FloorMapper`.
+  floor meters; pixel↔3D↔floor conversion lives in one `FloorMapper`. For a
+  color-only webcam there is no depth plane, so `HomographyMapper` solves the
+  same mapping from four clicked corners of a known-size rectangle.
 - **Portability note.** Obstacle detection sits behind the sensor layer too;
   everything above it (states, edit stack, config polygons, the "hidden" rule)
   is sensor-agnostic. A tablet/AR edition swaps only the detector.
@@ -59,13 +62,14 @@ python -m venv .venv
 # 2. install deps
 pip install -r requirements.txt
 
-# 3. run (auto-detects a Kinect; falls back to the mock sensor)
+# 3. run (auto-detects: Kinect → webcam → mock)
 python run.py
 
 # or force the simulated sensor / a specific backend
 python run.py --mock
 python run.py --sensor v1
 python run.py --sensor v2
+python run.py --camera 0 --resolution 1280x720
 ```
 
 Open **http://127.0.0.1:8000** in a browser (fullscreen on a TV: press `F`).
@@ -92,6 +96,43 @@ model the vision code inverts — so the full pipeline runs end to end:
 
 Both are imported lazily and fail open cleanly (`open()` → `False`), so the app
 still runs and falls back to the mock.
+
+### Playing with a regular 2D webcam
+
+No Kinect needed. Run `python run.py --camera 0` (or pick the camera in
+**Settings → Camera**). A webcam has no depth, so calibration differs:
+
+1. **Floor** — clear the floor and capture; this stores the empty-floor
+   reference used for obstacle/cup differencing.
+2. **Play area** — click the **four corners of a known-size rectangle** (choose
+   Small/Medium/Large first). The app solves a homography from those corners to
+   floor meters, which is what makes aiming, distances and the course layout
+   meaningful.
+3. Course, obstacles (frame differencing vs. the reference), cup and balls
+   (by hue) proceed as usual.
+
+### 2D webcam vs. Kinect — what a regular camera can and can't do
+
+A regular camera has no depth, so the same game runs through a different vision
+path. It works well on a plain, evenly-lit floor with high-contrast balls and
+obstacles; it degrades faster than a Kinect as those assumptions weaken.
+
+| Concern | Kinect v1 / v2 (depth) | Regular 2D webcam (color only) |
+|---|---|---|
+| Floor mapping | Plane fitted from depth (RANSAC); automatic, works on any floor texture | Homography solved from 4 clicked corners of a **known-size rectangle** (Small/Medium/Large preset); assumes a flat floor and a single plane |
+| Floor reference | Depth snapshot is absolute (height above floor) | Empty-floor **color** snapshot; later frames are differenced against it |
+| Ball detection | Depth-first: any small above-floor blob, then color to identify | **Hue only**: the ball must be a saturated, distinct color that doesn't appear elsewhere on the floor |
+| Obstacle detection | Height above the floor → works for any object, even a dark object on a dark floor | Frame differencing → needs visual contrast; a dark object on a dark floor, or a flat mat, may be missed |
+| Lighting | Robust (depth is mostly light-independent) | Sensitive: shadows, sunlight and auto-exposure/white-balance drift can create false obstacles |
+| Cup detection | Height + white-ring color | White-ring color + differencing; needs a clearly visible ring against the floor |
+| Height / ramps | Ball height is a secondary holed check on v2 | No height: a ball on a raised ramp maps to a slightly wrong floor position |
+| Setup accuracy | Automatic and quick | Depends on how carefully you click the four rectangle corners |
+
+In short: use a Kinect if you have one. A webcam is fully supported and playable,
+but give it a plain floor, good even lighting, and balls/obstacles that contrast
+strongly with the floor. The sensor abstraction means nothing else in the game
+changes — only the floor mapping and the detection heuristics differ, and both
+are already isolated behind `rumpus/sensor/` and `rumpus/vision/`.
 
 ## Assets (fonts / photos / music / SFX)
 
