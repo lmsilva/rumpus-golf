@@ -88,14 +88,34 @@ def _windows_devices() -> list[dict]:
     return rows
 
 
-def _binding(kind: str) -> tuple[str, bool, str]:
-    """Is the Python library that reads this Kinect importable?"""
+def _readers(kind: str) -> list[tuple[str, bool, str]]:
+    """Every way the game could read this sensor, and whether it is available.
+
+    A v1 has two, and they are not equivalent: Microsoft's runtime works with
+    the driver Windows already binds, while libfreenect needs that driver
+    *replaced* with libusbK. Reporting only the libfreenect one made a perfectly
+    usable sensor look unusable.
+    """
+    out: list[tuple[str, bool, str]] = []
+    if kind == "v1":
+        try:
+            from .kinect_nui import sensor_count
+            n = sensor_count()
+            out.append(("Kinect for Windows runtime (Kinect10.dll)", n > 0,
+                        f"{n} sensor(s) visible" if n
+                        else "runtime absent, or it cannot see the sensor"))
+        except Exception as exc:
+            out.append(("Kinect for Windows runtime (Kinect10.dll)", False,
+                        f"{type(exc).__name__}: {exc}"))
     module = "freenect" if kind == "v1" else "pylibfreenect2"
     try:
         m = __import__(module)
+        out.append((f"libfreenect binding ({module})", True,
+                    getattr(m, "__file__", "?") or "?"))
     except Exception as exc:
-        return module, False, f"{type(exc).__name__}: {exc}"
-    return module, True, getattr(m, "__file__", "?") or "?"
+        out.append((f"libfreenect binding ({module})", False,
+                    f"{type(exc).__name__}: {exc}"))
+    return out
 
 
 def report() -> list[str]:
@@ -142,11 +162,12 @@ def report() -> list[str]:
         if pid not in ms and role not in roles_present:
             out.append(f"  absent 0x{pid:04X}  {label}")
 
-    module, ok, detail = _binding(kind)
-    out += ["", "Python binding:",
-            f"  {module}: {'installed (' + detail + ')' if ok else 'MISSING'}"]
-    if not ok:
-        out.append(f"  {detail}")
+    readers = _readers(kind)
+    out += ["", "Ways to read it:"]
+    for label, ok, detail in readers:
+        out.append(f"  {'yes' if ok else 'no ':3s}  {label}")
+        out.append(f"         {detail}")
+    usable = any(ok for _l, ok, _d in readers)
 
     # The verdict. Ordered by what blocks first, because fixing a later step
     # while an earlier one is broken teaches you nothing.
@@ -160,16 +181,20 @@ def report() -> list[str]:
                 "  2. No driver is bound to the camera interface.",
                 "",
                 "Start with the adapter, then re-run this check."]
+    elif not usable:
+        out += ["The camera interface is on the bus, but nothing here can read",
+                "it. The easy fix is Microsoft's Kinect for Windows runtime",
+                "(v1.8), which installs the driver and the Kinect10.dll this",
+                "game talks to. Install that and re-run this check.",
+                "",
+                "Do not reach for Zadig / libusbK unless you intend to use",
+                "libfreenect: it replaces the Microsoft driver, and the two",
+                "cannot both have the camera."]
     elif any(d["problem"] not in (0, None) for d in devices
              if d["pid"] in table and table[d["pid"]][0] == "camera"):
-        out += ["The camera interface is on the bus but Windows has no working",
-                "driver for it. libfreenect needs libusbK bound to it (Zadig).",
-                "Fix that, then re-run this check."]
-    elif not ok:
-        out += ["The sensor looks healthy, but the game has no way to read it:",
-                f"the {module} Python binding is not installed. There is no pip",
-                "wheel for it on Windows; it has to be built against",
-                "libfreenect. Until then Rumpus will use your 2D camera."]
+        out += ["A reader is available but Windows reports a problem with the",
+                "camera interface, so expect it to fail. Clear the warning on",
+                "'Kinect for Windows Camera' in Device Manager first."]
     else:
         out += ["Everything needed is present. Start the game with:",
                 "    python run.py --prefer kinect"]

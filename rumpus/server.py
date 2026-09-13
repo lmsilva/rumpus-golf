@@ -262,6 +262,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                             "Could not open the camera. Close Zoom / Teams / Iriun "
                             "if it has the device, then press Retry."
                         )
+            started = time.perf_counter()
             frame = engine.grab_frame()
             interval = 0.1
             if engine.backend is not None:
@@ -282,7 +283,14 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                 traceback.print_exc()
                 time.sleep(0.2)
                 continue
-            time.sleep(interval if frame is not None else 0.1)
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            # Sleep out the rest of the frame period, not a whole one on top of
+            # the work. Grabbing, tracking and JPEG encoding take 20-30 ms, so
+            # the flat sleep held the loop to ~17 fps on a 30 fps sensor and lost
+            # every other frame of a moving ball.
+            time.sleep(max(0.0, interval - (time.perf_counter() - started)))
 
     thread = threading.Thread(target=loop, daemon=True)
 

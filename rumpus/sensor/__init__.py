@@ -105,20 +105,28 @@ def _note(report: dict | None, reason: str) -> None:
 def _kinect_failure_reason(kind: str) -> str:
     """Why a Kinect that USB can see still would not open.
 
-    Almost always a missing Python binding or an unbound camera interface, and
-    the two need different fixes, so name whichever one is actually wrong.
+    The fixes are completely different depending on which piece is missing, so
+    name the one that is actually wrong instead of listing them all.
     """
-    module = "freenect" if kind == "v1" else "pylibfreenect2"
     label = "Kinect v1" if kind == "v1" else "Kinect v2"
+    if kind == "v1":
+        from .kinect_nui import sensor_count
+        if sensor_count() == 0:
+            return (f"{label} is on USB but the Kinect for Windows runtime "
+                    f"cannot see it. Check the 12 V power adapter, then that "
+                    f"'Kinect for Windows Camera' has no warning in Device "
+                    f"Manager. Playing with the 2D camera instead.")
+        return (f"{label} is plugged in and the runtime can see it, but the "
+                f"streams would not start — something else may already have "
+                f"the sensor. Playing with the 2D camera instead.")
     try:
-        __import__(module)
+        __import__("pylibfreenect2")
     except Exception:
-        return (f"{label} is plugged in, but its driver library ({module}) is "
-                f"not installed, so the game cannot read depth. Playing with "
-                f"the 2D camera instead.")
-    return (f"{label} is plugged in and {module} is installed, but the sensor "
-            f"would not start. Check the 12 V power adapter, and that the "
-            f"camera interface has a libusbK driver.")
+        return (f"{label} is plugged in, but its driver library "
+                f"(pylibfreenect2) is not installed, so the game cannot read "
+                f"depth. Playing with the 2D camera instead.")
+    return (f"{label} is plugged in and pylibfreenect2 is installed, but the "
+            f"sensor would not start. Check the 12 V power adapter.")
 
 
 def _open_webcam(camera_index: int, camera_res: str, settings,
@@ -159,6 +167,16 @@ def _open_webcam(camera_index: int, camera_res: str, settings,
 
 def _try_open(kind: str) -> SensorBackend | None:
     if kind == "v1":
+        # Microsoft's runtime first. It is what a stock Windows box actually
+        # has, and using libfreenect instead would mean replacing the working
+        # KinectCamera driver with libusbK — destructive, and for no gain.
+        try:
+            from .kinect_nui import KinectNuiBackend
+            b = KinectNuiBackend()
+            if b.open():
+                return b
+        except Exception:
+            pass
         try:
             from .kinect_v1 import KinectV1Backend
             b = KinectV1Backend()
