@@ -8,6 +8,7 @@ camera), never pixels.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any, Optional
@@ -58,7 +59,7 @@ class SensorDescription:
     reliable_min_m: float
     reliable_max_m: float
     note: str = ""
-    fps: int = 30
+    fps: float = 30.0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -150,6 +151,9 @@ class Player:
     color: str                      # design token color (never green)
     hue_name: str = ""
     hue_range: Optional[tuple[int, int]] = None  # (lo, hi) in H [0..179]
+    hue_center: Optional[float] = None           # sampled OpenCV hue
+    sat_floor: Optional[int] = None              # 60% of sampled saturation
+    val_floor: Optional[int] = None              # 60% of sampled value
     order: int = 0
 
     def as_dict(self) -> dict[str, Any]:
@@ -159,6 +163,12 @@ class Player:
         }
         if self.hue_range is not None:
             d["hue_range"] = list(self.hue_range)
+        if self.hue_center is not None:
+            d["hue_center"] = round(float(self.hue_center), 2)
+        if self.sat_floor is not None:
+            d["sat_floor"] = int(self.sat_floor)
+        if self.val_floor is not None:
+            d["val_floor"] = int(self.val_floor)
         return d
 
 
@@ -207,7 +217,10 @@ class Event:
     data: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
+        clock = time.strftime("%H:%M", time.localtime(self.t)) if self.t else ""
         return {
             "type": self.type.value, "player_id": self.player_id,
             "hole": self.hole, "t": self.t, "data": self.data,
+            "text": (self.data or {}).get("text") or self.type.value,
+            "time": clock,
         }

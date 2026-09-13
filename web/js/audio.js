@@ -159,5 +159,16 @@ window.RG = window.RG || {};
       el.volume = Math.max(0, Math.min(1, el._duck));
       if (wantPlay) tryPlayMusic();
     },
+    announce(text) {
+      if (!text) return;
+      if (!(RG.settings && RG.settings.sfx && RG.settings.sfx.announcer)) return;
+      try {
+        if (!window.speechSynthesis) return;
+        const u = new SpeechSynthesisUtterance(String(text));
+        u.rate = 1;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } catch (e) { /* silent if the API is missing or blocked */ }
+    },
   };
 })();

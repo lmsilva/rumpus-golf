@@ -7,9 +7,10 @@ Usage:
     python run.py --sensor v2         # force Kinect v2 (pylibfreenect2)
     python run.py --camera 0          # force 2D webcam 0 (color-only)
     python run.py --camera 0 --resolution 1280x720
-    python run.py --host 0.0.0.0 --port 8000
+    python run.py --host 0.0.0.0 --port 8000   # LAN: prints a one-time ?t= token URL
 
 Then open http://127.0.0.1:8000 in a browser (fullscreen on a TV).
+LAN binds require the printed token URL so the camera feed is not open to the network.
 """
 from __future__ import annotations
 

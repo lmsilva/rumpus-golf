@@ -327,7 +327,7 @@ button.back-btn, button.hint {
   background: #15171c; position: relative; overflow: hidden;
   transition: box-shadow .2s ease;
 }
-.course-card.is-selected .course-map { box-shadow: inset 0 0 0 2px var(--mint); }
+.course-card.is-selected .course-map { background: #e3e0d8; box-shadow: inset 0 0 0 2px var(--mint); }
 .course-card .course-par { transition: background .2s ease, color .2s ease; }
 .course-card.is-selected .course-par { background: var(--invert-text); color: var(--invert); }
 .glass { background: var(--glass); backdrop-filter: blur(20px); border: 1px solid var(--line); }
@@ -420,6 +420,14 @@ button.back-btn, button.hint {
   animation: rg-progress 2s linear;
 }
 @keyframes rg-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.feed-progress.indet {
+  width: 36%; right: auto;
+  animation: rg-indet 1.2s ease-in-out infinite;
+}
+@keyframes rg-indet {
+  0% { transform: translateX(-20%); }
+  100% { transform: translateX(280%); }
+}
 .feed-band { position: absolute; left: 0; right: 0; background: rgba(13,15,18,.6); z-index: 2; pointer-events: none; }
 .feed-band-line { position: absolute; left: 0; right: 0; height: 3px; background: var(--mint); z-index: 3; pointer-events: none; }
 .feed-band-label { position: absolute; left: 32px; z-index: 3; font: 600 30px var(--font-body); pointer-events: none; }
@@ -485,6 +493,43 @@ button.back-btn, button.hint {
 @keyframes rg-slidein-left { from { transform: translateX(-1240px); } to { transform: translateX(0); } }
 @keyframes rg-fadein { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rg-flyin { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes rg-springdrop {
+  0% { transform: translateY(-300px); }
+  62% { transform: translateY(18px); }
+  82% { transform: translateY(-8px); }
+  100% { transform: translateY(0); }
+}
+@keyframes rg-s12-fade {
+  0%, 82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.s13-banner { animation: rg-springdrop .4s cubic-bezier(.22,1.45,.36,1) both; }
+.s12-root { position: absolute; inset: 0; z-index: 4; animation: rg-s12-fade 1.4s ease-out forwards; }
+.lost-bar { animation: rg-slideup .25s ease-out; }
+svg.overlay .rg-flash { animation: rg-flash .5s ease-in-out infinite; }
+svg.overlay .rg-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rg-pulse 1.2s ease-out infinite;
+}
+.overlay-html { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.overlay-outline-label {
+  position: absolute; transform: translate(-50%, -100%);
+  font: 700 26px Outfit, sans-serif; color: #8be9c3; white-space: nowrap;
+}
+.overlay-exit-label {
+  position: absolute; transform: translate(-100%, -100%);
+  font: 700 30px Outfit, sans-serif; color: #ff6b57; white-space: nowrap; text-align: right;
+}
+.overlay-ball-name {
+  position: absolute; transform: translate(-50%, -100%);
+  font: 700 24px Outfit, sans-serif; white-space: nowrap;
+}
+.overlay-reject-pill {
+  position: absolute; transform: translate(-50%, -120%);
+  font: 700 22px Outfit, sans-serif; color: #15171c; white-space: nowrap;
+  background: #ff6b57; border-radius: 999px; padding: 6px 14px;
+}
 .recal-flyout { animation: rg-flyin .2s ease-out; }
 .recal-card {
   display: block; width: 100%; text-align: left; cursor: pointer;

@@ -11,6 +11,10 @@ This is a **prototype** implementing the full design handoff
 calibration, obstacle detection & correction, ball tracking with occlusion
 ("hidden") handling, and the complete game flow for 2–6 players over 1–9 holes.
 
+The HTML files in `requirements/design_handoff_rumpus_golf/design/` are
+documentation artboards only. Opening them in a browser fetches React and Babel
+from unpkg; they are not part of the served application.
+
 ---
 
 ## Architecture
@@ -73,6 +77,23 @@ python run.py --camera 0 --resolution 1280x720
 ```
 
 Open **http://127.0.0.1:8000** in a browser (fullscreen on a TV: press `F`).
+
+## Security
+
+The server streams a live camera feed and accepts game input over a websocket.
+It is meant for a laptop or TV on your own network, not the public internet.
+
+- **Localhost by default.** `python run.py` binds `127.0.0.1`. Other pages on
+  this machine cannot talk to `/ws` unless their Origin host and port match
+  the server (the browser does not enforce same-origin on WebSockets; the
+  server does).
+- **Origin-checked websocket.** A page served from another host or port is
+  refused (close code 4403) before the connection is accepted. Non-browser
+  clients that send no `Origin` header are allowed.
+- **Token required for LAN mode.** `python run.py --host 0.0.0.0` prints a
+  one-line warning and a URL with `?t=<token>`. Open that URL on the TV.
+  The index page and `/ws` reject requests that omit the token. Loopback
+  stays tokenless.
 
 ### Playing without a Kinect (mock sensor)
 

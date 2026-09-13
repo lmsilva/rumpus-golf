@@ -24,8 +24,9 @@ DEFAULTS: dict[str, Any] = {
     },
     "sfx": {"enabled": True, "volume": 0.8, "announcer": True},
     "controller": {"rumble": True},
-    "display": {"showCameraFeed": True},
-    "camera": {"device": 0, "resolution": "1280x720", "backend": "auto"},
+    "display": {"showCameraFeed": True, "debugOverlay": False},
+    "camera": {"device": 0, "resolution": "1280x720", "backend": "auto",
+               "exposure": -6},
     "rules": {"holes": 3, "strokeCap": 8, "oobPenalty": True, "tunnelBonus": True},
 }
 

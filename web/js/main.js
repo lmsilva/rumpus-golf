@@ -15,7 +15,7 @@ window.RG = window.RG || {};
   // ---- websocket ----
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws = new WebSocket(`${proto}://${location.host}/ws${location.search || ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") {
@@ -43,6 +43,7 @@ window.RG = window.RG || {};
     const rebuild = screen !== lastScreen || sig !== lastSignature;
 
     if (rebuild) {
+      const screenChanged = screen !== lastScreen;
       const keep = focusKey(document.activeElement);
       if (RG.feed && RG.feed.detach) RG.feed.detach();
       scene.innerHTML = RG.screens.render(st);
@@ -57,7 +58,10 @@ window.RG = window.RG || {};
       } else if (!restoreFocus(keep)) {
         focusFirst();
       }
-      rumbleFor(screen);
+      if (screenChanged) {
+        rumbleFor(screen);
+        cueScreenAudio(screen, st);
+      }
     }
     const slot = scene.querySelector("[data-feed-slot]");
     const feedOn = !(st.feed && st.feed.enabled === false);
@@ -77,23 +81,25 @@ window.RG = window.RG || {};
     }
     if (st.screen === "S06") return (st.game && st.game.course_id) || "";
     if (st.screen === "S07") return `${(st.ui && st.ui.ghosts || []).length}|${st.ui && st.ui.selected}`;
-    if (st.screen === "S08") return (st.ui && st.ui.has_hole) ? "1" : "0";
+    if (st.screen === "S08") return `${(st.ui && st.ui.has_hole) ? 1 : 0}|${(st.ui && st.ui.searching) ? 1 : 0}|${(st.ui && st.ui.manual) ? 1 : 0}`;
     if (st.screen === "S10") return [(st.ui && st.ui.holes), (st.ui && st.ui.stroke_cap)].join("|");
     if (st.screen === "S07b" || st.screen === "S07c") {
       const obs = (st.ui && st.ui.obstacles) || [];
-      return [st.ui && st.ui.selected, obs.map((o) => `${o.state}:${o.confidence}`).join(",")].join("|");
+      return [st.ui && st.ui.selected, st.ui && st.ui.undo_count, obs.map((o) => `${o.state}:${o.confidence}`).join(",")].join("|");
     }
     if (st.screen === "S09") {
       const ps = (st.ui && st.ui.players) || [];
-      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}`;
+      return `${st.ui && st.ui.selected}|${ps.map((p) => p.id).join(",")}|${ps.map((p) => p.hue_name).join(",")}|${st.ui && st.ui.hue_clash ? 1 : 0}`;
     }
+    if (st.screen === "S14") return String(((st.ui && st.ui.lost_balls) || []).length);
     if (st.screen === "S15") return `${st.ui && st.ui.focus}|${st.ui && st.ui.recal_flyout ? 1 : 0}`;
     if (st.screen !== "S11") return "";
     const g = st.game || {};
     const ui = st.ui || {};
     const a = ui.active_player;
     const others = (ui.others || []).map((p) => `${p.id}:${(g.scores[p.id] || [])[g.hole - 1] || 0}`).join(",");
-    return [a && a.id, g.hole, (g.scores[a && a.id] || [])[g.hole - 1] || 0, ui.awaiting_tee ? 1 : 0, others].join("|");
+    const lost = ((ui.lost_balls || []).map((b) => b.id).join(","));
+    return [a && a.id, g.hole, (g.scores[a && a.id] || [])[g.hole - 1] || 0, ui.awaiting_tee ? 1 : 0, others, lost].join("|");
   }
 
   function settingsSig(st) {
@@ -108,6 +114,8 @@ window.RG = window.RG || {};
       s.rules && s.rules.holes, s.rules && s.rules.strokeCap, s.rules && s.rules.oobPenalty, s.rules && s.rules.tunnelBonus,
       cam.active_device, cam.resolution, cam.backend, names,
       cam.is_mock, cam.error, st.sensor && st.sensor.model,
+      cam.lock_notice, cam.locked,
+      s.display && s.display.debugOverlay,
     ].join("|");
   }
 
@@ -233,6 +241,8 @@ window.RG = window.RG || {};
       el.addEventListener("click", () => RG.send({ t: "set", key: "settings.controller.rumble", value: !(RG.settings && RG.settings.controller && RG.settings.controller.rumble) })));
     scene.querySelectorAll("[data-set-feed]").forEach((el) =>
       el.addEventListener("click", () => RG.send({ t: "set", key: "settings.display.showCameraFeed", value: !(RG.settings && RG.settings.display && RG.settings.display.showCameraFeed) })));
+    scene.querySelectorAll("[data-set-debug-overlay]").forEach((el) =>
+      el.addEventListener("click", () => RG.send({ t: "set", key: "settings.display.debugOverlay", value: !(RG.settings && RG.settings.display && RG.settings.display.debugOverlay) })));
 
     function paintSlider(el) {
       const min = Number(el.min || 0), max = Number(el.max || 100), val = Number(el.value || 0);
@@ -267,6 +277,13 @@ window.RG = window.RG || {};
       el.addEventListener("change", () => RG.send({ t: "set", key: "settings.camera.resolution", value: el.value })));
     scene.querySelectorAll("[data-set-camera-backend]").forEach((el) =>
       el.addEventListener("change", () => RG.send({ t: "set", key: "settings.camera.backend", value: el.value })));
+    scene.querySelectorAll("[data-set-camera-exposure]").forEach((el) =>
+      el.addEventListener("input", () => {
+        const v = parseFloat(el.value);
+        const label = el.parentElement && el.parentElement.querySelector("[data-exposure-label]");
+        if (label) label.textContent = String(v);
+        RG.send({ t: "set", key: "settings.camera.exposure", value: v });
+      }));
 
     scene.querySelectorAll("input[data-text]").forEach((el) => {
       const key = el.getAttribute("data-text");
@@ -277,6 +294,13 @@ window.RG = window.RG || {};
       el.addEventListener("change", send);
       el.addEventListener("keydown", (e) => { if (e.key === "Enter") { send(); el.blur(); } e.stopPropagation(); });
     });
+
+    if (state && (state.screen === "S12" || state.screen === "S13")) {
+      scene.addEventListener("click", (e) => {
+        if (e.target.closest && e.target.closest("button, input, [data-action]")) return;
+        RG.send({ t: "action", a: "confirm" });
+      });
+    }
   }
 
   function applyMarquee() {
@@ -345,7 +369,7 @@ window.RG = window.RG || {};
       if (on) btn.style.removeProperty("background");
       else btn.style.background = "rgba(242,239,232,.08)";
       const label = btn.querySelector(":scope > span:first-child");
-      if (label) label.textContent = on ? "Use this course" : "Choose";
+      if (label) label.textContent = on ? "Selected" : "Choose";
     });
   }
   function syncCourseHighlight(el) {
@@ -524,11 +548,17 @@ window.RG = window.RG || {};
     // Pause extras (INPUT.md): F fix · R recalibrate · C course · M music · Q quit
     const screen = state && state.screen;
     if (screen === "S15") {
+      if (key === "b") { RG.send({ t: "action", a: "resume" }); return; }
+      if (key === "x") { RG.send({ t: "action", a: "undo" }); return; }
       if (key === "f") { RG.send({ t: "action", a: "fix" }); return; }
       if (key === "r") { RG.send({ t: "action", a: "recalibrate" }); return; }
       if (key === "c") { RG.send({ t: "action", a: "course" }); return; }
       if (key === "m") { RG.send({ t: "action", a: "music" }); return; }
       if (key === "q") { RG.send({ t: "action", a: "quit" }); return; }
+    }
+    if ((screen === "S07c" || screen === "S07b") && (key === "Delete" || key === "Backspace")) {
+      RG.send({ t: "action", a: "remove_corner" });
+      return;
     }
 
     // Global shortcuts (work regardless of focus)
@@ -543,6 +573,25 @@ window.RG = window.RG || {};
   function toggleFullscreen() {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
     else document.exitFullscreen();
+  }
+
+  let screenAudioT = [];
+  function cueScreenAudio(screen, st) {
+    screenAudioT.forEach((id) => clearTimeout(id));
+    screenAudioT = [];
+    const later = (fn, ms) => { screenAudioT.push(setTimeout(fn, ms)); };
+    if (screen === "S12") {
+      RG.audio.sfx("sting");
+      const name = st.ui && st.ui.player && st.ui.player.name;
+      later(() => RG.audio.announce(name), 300);
+    }
+    if (screen === "S13") {
+      RG.audio.sfx("plink");
+      later(() => RG.audio.sfx("cheer"), 200);
+      const p = st.ui && st.ui.player;
+      const n = st.ui && st.ui.strokes;
+      if (p) RG.audio.announce(`${p.name} holed in ${n}`);
+    }
   }
 
   function rumbleFor(screen) {

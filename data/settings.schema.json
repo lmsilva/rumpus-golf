@@ -76,6 +76,10 @@
         "showCameraFeed": {
           "type": "boolean",
           "default": true
+        },
+        "debugOverlay": {
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -98,6 +102,12 @@
             "kinect"
           ],
           "default": "auto"
+        },
+        "exposure": {
+          "type": "number",
+          "minimum": -8,
+          "maximum": -4,
+          "default": -6
         }
       }
     },

@@ -44,7 +44,9 @@ function photo(name, filter, scrim, opts = {}) {
 function livePill(st, compact) {
   const w = (st.feed && st.feed.w) || 0;
   const h = (st.feed && st.feed.h) || 0;
-  return `<span class="pill live-pill">${compact ? "LIVE" : `LIVE · ${w} × ${h} · 30 fps`}</span>`;
+  const fps = (st.sensor && st.sensor.fps) || (st.ui && st.ui.camera && st.ui.camera.measured_fps) || 30;
+  const fpsTxt = Number(fps).toFixed(Number(fps) % 1 ? 1 : 0);
+  return `<span class="pill live-pill">${compact ? "LIVE" : `LIVE · ${w} × ${h} · ${fpsTxt} fps`}</span>`;
 }
 function hasDepth(st) {
   const d = (st.sensor && st.sensor.depth_res) || (st.ui && st.ui.sensor && st.ui.sensor.depth_res);
@@ -175,8 +177,8 @@ S.S04 = function (st) {
       <div class="feed-band" style="bottom:0;height:7.4%"></div>
       <div class="feed-band-line" style="top:21.3%"></div>
       <div class="feed-band-line" style="bottom:7.4%"></div>
-      <div class="feed-band-label" style="top:14%">4.0 m — too far for reliable depth</div>
-      <div class="feed-band-label" style="bottom:2%">0.8 m — too close</div>
+      <div class="feed-band-label" style="top:14%;color:#f2efe8">4.0 m — too far for reliable depth</div>
+      <div class="feed-band-label" style="bottom:2%;color:#f2efe8">0.8 m — too close</div>
       <div class="feed-band-label" style="top:26%;font:700 30px var(--font-display);color:var(--mint)">Good floor — fit a course inside this band</div>
       ${livePill(st, true)}
       ${st.setup && st.setup.capturing ? `<div class="feed-progress"></div>` : ""}
@@ -260,7 +262,7 @@ S.S06 = function (st) {
           <div style="font:400 18px/1.4 var(--font-body);opacity:.8">${esc(c.blurb)}</div>
           <div class="kicker" style="margin-top:14px">You will need</div>
           <div style="font:400 17px/1.4 var(--font-body);margin-top:6px">${c.needs.map(esc).join(" · ")}</div>
-          <div class="row" style="margin-top:16px"><button type="button" class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${sel ? "Use this course" : "Choose"}</span>${RG.btnHint("confirm")}</button></div>
+          <div class="row" style="margin-top:16px"><button type="button" class="btn ${sel ? "primary" : "secondary"} sm" data-action="confirm" data-index="${i}" style="${sel ? "" : "background:rgba(242,239,232,.08)"}"><span>${sel ? "Selected" : "Choose"}</span>${RG.btnHint("confirm")}</button></div>
         </div>`;
       }).join("")}
     </div>
@@ -269,11 +271,11 @@ S.S06 = function (st) {
 
 function courseMap(c) {
   const obs = c.obstacles || [];
-  let s = `<span style="position:absolute;left:${c.start.x}%;top:${c.start.y}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border:2px solid #f2efe8;border-radius:50%"></span>`;
+  let s = `<span style="position:absolute;left:${c.start.x}%;top:${c.start.y}%;width:11%;aspect-ratio:1;transform:translate(-50%,-50%);border:3px solid #f2efe8;border-radius:50%"></span>`;
   s += `<span style="position:absolute;left:${c.hole.x}%;top:${c.hole.y}%;width:7%;aspect-ratio:1;transform:translate(-50%,-50%);background:var(--mint);border-radius:50%"></span>`;
   for (const o of obs) {
     const fill = o.kind === "hazard" ? "repeating-linear-gradient(45deg,#ff6b57 0 4px,#b9483a 4px 8px)"
-      : o.kind === "book" ? "#f2efe8" : o.kind === "tube" ? "#c9c4b8" : "#8a8f99";
+      : o.kind === "book" ? "#f2efe8" : o.kind === "tube" ? "#c9c4b8" : "#6b7280";
     s += `<span style="position:absolute;left:${o.x}%;top:${o.y}%;width:${o.w}%;height:${o.h}%;background:${fill};border-radius:2px"></span>`;
   }
   return s;
@@ -358,6 +360,7 @@ S["S07c"] = function (st) {
     <span class="pill">${`<span class="swatch" style="background:#f2efe8"></span>`} Confirmed</span>
     <span class="pill">${`<span class="swatch" style="background:rgba(242,239,232,.3)"></span>`} Pending</span>
     <span class="pill">${`<span class="swatch" style="background:var(--coral);opacity:.35"></span>`} Deleted</span>
+    <span class="pill">${`<span class="swatch" style="background:#f2efe8;border-top:1px dashed #f2efe8;height:0;opacity:.8"></span>`} Drawing</span>
   </div>
   <div class="glass-strong" style="position:absolute;right:40px;top:56px;bottom:56px;width:520px;border-radius:24px;padding:36px;z-index:3;display:flex;flex-direction:column">
     <div class="kicker mint">Object ${(sel != null ? sel + 1 : 1)} · ${selected ? esc(selected.label || "") : ""}</div>
@@ -380,27 +383,24 @@ S["S07c"] = function (st) {
       <div style="font:400 14px var(--font-body);color:var(--text-muted)">Undo steps back through every edit in this step, including re-detects.</div>
     </div>
   </div>
-  <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add / remove corner")}${RG.hint("prev", "Undo")}</div>`;
+  <div class="hints">${RG.hint("stick", "Drag corner")}${RG.hint("confirm", "Confirm this one")}${RG.hint("undo", "Delete")}${RG.hint("secondary", "Add / remove corner")}${RG.hint("prev", `Undo · ${(st.ui && st.ui.undo_count) || 0}`)}</div>`;
 };
 
 S.S08 = function (st) {
+  const ui = st.ui || {};
+  const searching = !!ui.searching && !ui.has_hole;
+  const title = searching ? "Place the putting cup inside the play area." : (ui.manual && !ui.has_hole ? "Click the cup, then drag the edge to size it." : "Found the cup.");
   return `
-  ${topbar("", { rail: stepRail(4) })}
-  <div style="display:grid;grid-template-columns:1fr 480px;gap:24px;padding:32px 56px 48px;height:calc(100% - 96px)">
-    <div class="feed-slot" data-feed-slot data-feed-interactive style="border-radius:24px">
-      ${livePill(st, true)}
-      <div class="hints">${RG.hint("stick", "Move cup")}${RG.hint("undo", "Reset")}${RG.hint("secondary", "Click to place")}</div>
-    </div>
-    <div class="card" style="padding:36px;display:flex;flex-direction:column">
-      <div class="kicker mint">Step 4 of 5 · Cup</div>
-      <h2 style="font-size:48px;line-height:1;margin:8px 0 12px">Mark the hole.</h2>
-      <div style="font:400 17px/1.45 var(--font-body);color:var(--text-muted)">The mint circle starts where this course suggests the cup. Put the real cup on the floor, then drag the circle onto it. Drag the mint dot on the edge to resize.</div>
-      <div style="margin-top:auto;display:flex;flex-direction:column;gap:10px">
-        <button class="btn primary stretch" data-action="confirm"><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
-        <button class="btn secondary stretch" data-action="draw"><span>Click to place</span>${RG.btnHint("secondary")}</button>
-        <button class="btn secondary stretch quiet" data-action="redetect"><span>Reset to suggested</span>${RG.btnHint("undo")}</button>
-      </div>
-    </div>
+  ${searching ? `<div class="feed-progress indet"></div>` : ""}
+  <div class="glass" style="position:absolute;left:40px;top:40px;max-width:720px;padding:28px 32px;border-radius:24px;z-index:3">
+    <div class="kicker mint">Step 4 of 5 · Cup</div>
+    <h2 style="font-size:60px;line-height:1;margin:8px 0 10px">${esc(title)}</h2>
+    <div style="font:400 21px/1.45 var(--font-body);color:var(--text-soft)">${searching ? "Looking for a still cup with a white ring." : "Mint circle sits on the ring. Drag the cream dot to resize."}</div>
+  </div>
+  <div class="row" style="position:absolute;left:40px;bottom:40px;gap:12px;z-index:3">
+    <button class="btn primary" data-action="confirm"${ui.has_hole ? "" : " disabled"}><span>That’s the hole</span>${RG.btnHint("confirm")}</button>
+    <button class="btn glass" data-action="redetect"><span>Detect again</span>${RG.btnHint("undo")}</button>
+    <button class="btn glass" data-action="draw"><span>Draw it myself</span>${RG.btnHint("secondary")}</button>
   </div>`;
 };
 
@@ -429,6 +429,7 @@ S.S09 = function (st) {
         </div>
       </div>`).join("")}
       <div class="row" style="border:1px dashed rgba(242,239,232,.2);border-radius:16px;padding:16px;color:var(--text-muted);font:400 17px var(--font-body)">${players.length ? `Room for ${Math.max(0, 6 - players.length)} more colors — click another ball on the camera.` : "No balls yet — click each ball on the camera to add a player."}</div>
+      ${st.ui.hue_clash ? `<div class="warn-banner" style="margin-top:8px">${esc(st.ui.hue_clash)}</div>` : ""}
     </div>
     <div class="col" style="margin-top:auto;gap:10px">
       ${roomNameField(st, "Save as")}
@@ -515,6 +516,7 @@ S.S11 = function (st) {
       ${awaiting ? `<button class="btn primary sm" data-action="ready"><span>It’s in the start zone — let’s play</span>${RG.btnHint("confirm")}</button>` : ""}
       ${RG.hint("undo", "Undo last shot")}${RG.hint("menu", "Pause")}
     </div>
+    ${lostBallBar(ui.lost_balls, 0)}
     <div class="pill" style="position:absolute;right:0;top:230px;pointer-events:auto">
       ${dot(a ? a.color : "#fff", 10)}<span data-play-pill>${esc(playPill(ui, motion))}</span>
     </div>
@@ -546,17 +548,38 @@ function playPill(ui, motion) {
   return "Ball stopped";
 }
 
+function lostBallBar(lost, inset) {
+  const row = (lost || [])[0];
+  if (!row) return "";
+  const edge = inset == null ? 40 : inset;
+  return `<div class="lost-bar glass-strong" style="position:absolute;left:${edge}px;right:${edge}px;bottom:${edge}px;border-radius:24px;padding:22px 28px;z-index:6;display:flex;align-items:center;gap:16px;pointer-events:auto">
+    ${dot(row.color, 20)}
+    <div><div style="font:700 28px var(--font-display)">Lost ${esc(row.name)}’s ball.</div>
+    <div style="font:400 21px var(--font-body);color:var(--text-muted)">It left the camera. Re-assign if you swapped colors.</div></div>
+    <span style="margin-left:auto">${RG.hint("secondary", "Re-assign balls")}</span>
+  </div>`;
+}
+
 S.S12 = function (st) {
   const p = st.ui.player || {};
+  const prev = st.ui.prev || {};
   const stroke = st.ui.stroke;
   const fill = playerFill(p.color);
   return `
-  <div style="position:absolute;inset:0;background:rgba(var(--ground-rgb),.4);z-index:4"></div>
-  <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${fill.bg};color:${fill.fg};border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5;box-sizing:border-box;border-left:18px solid ${fill.accent}">
-    <div class="kicker" style="color:${fill.fg};opacity:.65">Next up</div>
-    <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name || "Player")}</div>
-    <div style="font:600 32px/1.35 var(--font-body);opacity:.8;word-spacing:0.12em">${stroke === 0 ? `Place the ${esc(p.hue_name || "next")} ball in the start zone` : `Play the ${esc(p.hue_name || "next")} ball where it lies · stroke ${stroke}`}</div>
-    <div style="margin-top:28px">${RG.hint("confirm", "Skip")}</div>
+  <div class="s12-root">
+    <div style="position:absolute;inset:0;background:rgba(var(--ground-rgb),.4);z-index:4"></div>
+    <div style="position:absolute;left:0;top:0;bottom:0;width:1240px;background:${fill.bg};color:${fill.fg};border-radius:0 120px 120px 0;box-shadow:40px 0 120px rgba(0,0,0,.4);animation:rg-slidein-left .35s ease-out;display:flex;flex-direction:column;justify-content:flex-end;padding:0 96px 96px;z-index:5;box-sizing:border-box;border-left:18px solid ${fill.accent}">
+      <div class="kicker" style="color:${fill.fg};opacity:.65">Next up</div>
+      <div style="font:800 230px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(p.name || "Player")}</div>
+      <div style="font:600 32px/1.35 var(--font-body);opacity:.8;word-spacing:0.12em">${stroke === 0 ? `Place the ${esc(p.hue_name || "next")} ball in the start zone` : `Play the ${esc(p.hue_name || "next")} ball where it lies · stroke ${stroke}`}</div>
+    </div>
+    ${prev.name ? `<div style="position:absolute;right:56px;top:56px;text-align:right;z-index:6">
+      <div class="kicker muted">${esc(prev.name)} stopped</div>
+      <div class="row" style="justify-content:flex-end;gap:14px;margin-top:8px">
+        ${dot(prev.color, 24)}
+        <div style="font:800 56px/1.1 var(--font-display)">Stroke ${st.ui.prev_stroke || 0} · in play</div>
+      </div>
+    </div>` : ""}
   </div>`;
 };
 
@@ -568,23 +591,23 @@ S.S13 = function (st) {
   const sub = diff === 0 ? "On par" : diff < 0 ? "Under par — birdie!" : "Over par, still counts";
   const fill = playerFill(p.color);
   return `
-  <div style="position:absolute;left:40px;top:40px;right:40px;background:${fill.bg};color:${fill.fg};border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;animation:rg-slideup .4s ease-out;border-left:18px solid ${fill.accent}">
+  <div class="s13-banner" style="position:absolute;left:40px;top:40px;right:40px;background:${fill.bg};color:${fill.fg};border-radius:28px;padding:48px 64px;box-shadow:0 30px 80px rgba(0,0,0,.4);display:flex;align-items:center;gap:40px;z-index:5;border-left:18px solid ${fill.accent}">
     <div style="font:800 200px/1 var(--font-display);letter-spacing:-.05em">In!</div>
     <div><div style="font:800 64px/1.05 var(--font-display)">${esc(p.name)} holed in ${n}.</div>
     <div style="font:600 30px var(--font-body);opacity:.7">${sub} · Par ${par}</div></div>
   </div>
   <div class="row" style="position:absolute;left:56px;bottom:48px;gap:12px;z-index:5">
-    ${RG.hint("undo", "Wrong call? Undo within 5 s")}
-    <button class="btn primary sm" data-action="confirm"><span>Continue</span>${RG.btnHint("confirm")}</button>
+    ${RG.hint("undo", "Wrong call? Undo within 5 s — the ball goes back in play at the cup.")}
   </div>`;
 };
 
 S.S14 = function (st) {
   const p = st.ui.player || {};
+  const lost = st.ui.lost_balls || [];
   return `
   <div class="row" style="position:absolute;inset:40px;z-index:3;align-items:flex-start;gap:16px">
     ${p ? `<div style="background:${p.color};color:var(--player-text);border-radius:24px;padding:26px 40px;display:flex;align-items:center;gap:36px">
-      <div><div class="kicker" style="color:var(--player-text);opacity:.7">Your turn</div><div style="font:800 76px/1.15 var(--font-display)">${esc(p.name)}</div></div>
+      <div><div class="kicker" style="color:var(--player-text);opacity:.7">Your turn</div><div style="font:800 76px/1.15 var(--font-display);overflow:hidden">${marquee(p.name)}</div></div>
       <div><div class="kicker" style="color:var(--player-text);opacity:.7">Stroke</div><div style="font:800 76px/1.15 var(--font-display)">${st.ui.strokes} + 1</div></div>
     </div>` : ""}
     <div style="background:var(--coral);color:#15171c;border-radius:24px;padding:26px 40px">
@@ -592,11 +615,11 @@ S.S14 = function (st) {
       <div style="font:800 52px/1 var(--font-display)">+1 penalty</div>
     </div>
   </div>
-  <div class="glass" style="position:absolute;left:40px;bottom:40px;right:40px;border-radius:24px;padding:22px 28px;z-index:3;display:flex;align-items:center;gap:16px">
-    ${dot(p.color, 20)}<span style="font:700 28px var(--font-display)">Replace the ball at the exit point.</span>
-    <span style="font:400 21px var(--font-body);color:var(--text-muted)">Exit point — put the ball back here, then press A.</span>
+  <div class="glass-strong" style="position:absolute;left:40px;bottom:${lost.length ? 140 : 40}px;right:40px;border-radius:24px;padding:18px 24px;z-index:3;display:flex;align-items:center;gap:16px">
+    ${dot(p.color, 20)}<span style="font:700 26px var(--font-display)">Replace the ball at the exit point.</span>
     <span style="margin-left:auto"><button class="btn primary sm" data-action="confirm"><span>Replaced</span>${RG.btnHint("confirm")}</button></span>
-  </div>`;
+  </div>
+  ${lostBallBar(lost)}`;
 };
 
 S.S15 = function (st) {
@@ -604,13 +627,13 @@ S.S15 = function (st) {
   const focus = ui.focus || 0;
   const flyout = !!(ui.recal_flyout || focus === 3);
   const rows = [
-    ["Resume", "resume", "back"],
-    ["Undo last shot", "undo", "undo"],
-    ["Fix score", "fix", "confirm"],
-    ["Recalibrate…", "recalibrate", "confirm"],
-    ["Change course for this hole", "course", "confirm"],
-    ["Music & sound", "music", "confirm"],
-    ["Quit to start", "quit", "confirm"],
+    ["Resume", "resume", "B", "back"],
+    ["Undo last shot", "undo", "X", "undo"],
+    ["Fix score", "fix", "F", ""],
+    ["Recalibrate…", "recalibrate", "R", ""],
+    ["Change course for this hole", "course", "C", ""],
+    ["Music & sound", "music", "M", ""],
+    ["Quit to start", "quit", "Q", ""],
   ];
   const recal = [
     ["Re-detect cup", "Someone kicked it. Re-runs the cup step only.", "cup"],
@@ -624,8 +647,8 @@ S.S15 = function (st) {
   const scores = ui.scores || {};
   const scoreCard = `
   <div class="glass" style="position:absolute;right:40px;top:40px;width:520px;border-radius:24px;padding:28px 32px;z-index:3">
-    <div class="kicker">Hole ${ui.hole} of 3 · Par 3</div>
-    <div style="font:800 34px/1 var(--font-display);margin:4px 0 14px">${esc(st.game && st.game.course ? st.game.course.name : "")}</div>
+    <div class="kicker">Hole ${ui.hole} of ${ui.holes || (st.game && st.game.holes) || 3} · Par ${ui.par || (st.game && st.game.course && st.game.course.par) || ""}</div>
+    <div style="font:800 34px/1 var(--font-display);margin:4px 0 14px">${esc((ui.course && ui.course.name) || (st.game && st.game.course && st.game.course.name) || "")}</div>
     ${((st.game && st.game.players) || []).map((p) => `<div class="row" style="padding:6px 0">
       ${dot(p.color, 16)}<span style="font:700 22px/1.25 var(--font-display);flex:1">${esc(p.name)}</span>
       <span style="font:800 26px var(--font-display)">${(scores[p.id] || [])[ui.hole - 1] || 0}</span>
@@ -648,8 +671,8 @@ S.S15 = function (st) {
     <div class="kicker muted">Hole ${ui.hole} · ${esc(active.name || "")} to play</div>
     <h2 style="font-size:88px">Paused.</h2>
     <div class="col" style="margin-top:24px;gap:8px">
-      ${rows.map(([label, key, verb], i) => `<button class="row" data-action="select" data-index="${i}" style="border-radius:16px;padding:18px 22px;font:700 26px var(--font-display);background:${i === focus ? "var(--mint)" : "var(--fill-quiet)"};color:${i === focus ? "var(--mint-text)" : "var(--text)"};border:none;text-align:left;cursor:pointer">
-        <span style="flex:1">${esc(label)}</span>${RG.glyph(verb)}
+      ${rows.map(([label, key, letter, verb], i) => `<button class="row" data-action="select" data-index="${i}" style="border-radius:16px;padding:18px 22px;font:700 26px var(--font-display);background:${i === focus ? "var(--mint)" : "var(--fill-quiet)"};color:${i === focus ? "var(--mint-text)" : "var(--text)"};border:none;text-align:left;cursor:pointer">
+        <span style="flex:1">${esc(label)}</span>${RG.pauseGlyph(letter, verb)}
       </button>`).join("")}
     </div>
     <div style="margin-top:auto;font:400 15px var(--font-body);color:var(--text-muted)">${flyout ? "Recalibrate opens the setup screens with current values pre-filled; Back returns here with the game intact." : "Music ducks to 30% while paused."}</div>
@@ -682,14 +705,18 @@ S.S16 = function (st) {
     </div>
     <div class="card" style="padding:40px">
       <div class="kicker">Event log · newest first</div>
-      <div style="background:var(--invert);color:var(--invert-text);border-radius:18px;padding:20px 24px;margin-top:16px">
+      ${(() => {
+        const undo = st.ui.undo;
+        const line = undo ? `${undo.name} · stroke ${undo.from} → ${undo.to}` : "No events yet";
+        return `<div style="background:var(--invert);color:var(--invert-text);border-radius:18px;padding:20px 24px;margin-top:16px">
         <div class="kicker" style="color:var(--invert-text);opacity:.7">Undo last shot</div>
-        <div style="font:700 24px var(--font-display)">${esc((st.game.event_log || []).slice(-1)[0] ? "Most recent stroke" : "No events yet")}</div>
-      </div>
+        <div class="row" style="margin-top:6px"><span style="font:700 24px var(--font-display);flex:1">${esc(line)}</span>${RG.hint("undo")}</div>
+      </div>`;
+      })()}
       <div class="col" style="margin-top:16px;gap:0">
         ${(st.game.event_log || []).slice().reverse().slice(0, 12).map((e) => `<div class="row" style="padding:14px 0;border-bottom:1px solid var(--line)">
-          <span style="font:600 14px var(--font-body);color:var(--text-muted);width:52px">${e.hole}</span>
-          ${dot("#fff", 12)}<span style="font:400 18px var(--font-body)">${esc(e.type)}</span>
+          <span style="font:600 14px var(--font-body);color:var(--text-muted);width:52px">${esc(e.time || "")}</span>
+          ${dot(e.color || "#f2efe8", 12)}<span style="font:400 18px var(--font-body)">${esc(e.text || e.type)}</span>
         </div>`).join("")}
       </div>
     </div>
@@ -713,10 +740,19 @@ S.S17 = function (st) {
           </tr>
           ${sc.players.map((p) => `<tr style="border-bottom:1px solid var(--line)">
             <td style="padding:12px 0">${dot(p.color, 26)} <span style="font:700 30px var(--font-display);max-width:260px;overflow:hidden;display:inline-block;vertical-align:middle">${marquee(p.name)}</span></td>
-            ${sc.holes.map((h) => { const v = p.scores[h - 1]; const over = v != null && sc.pars[h - 1] != null && v > sc.pars[h - 1]; return `<td style="text-align:center;${over ? "color:var(--coral)" : ""}">${v == null ? "○" : v}</td>`; }).join("")}
+            ${sc.holes.map((h) => {
+              const v = p.scores[h - 1];
+              const over = v != null && sc.pars[h - 1] != null && v > sc.pars[h - 1];
+              const played = sc.players.map((q) => q.scores[h - 1]).filter((n) => n != null);
+              const best = played.length ? Math.min(...played) : null;
+              const isBest = v != null && v === best;
+              if (v == null) return `<td style="text-align:center;opacity:.3">○</td>`;
+              return `<td style="text-align:center;${over ? "color:var(--coral);" : ""}${isBest ? "font-weight:800" : ""}">${v}</td>`;
+            }).join("")}
             <td style="text-align:center;font:800 30px var(--font-display)">${p.total}</td>
           </tr>`).join("")}
         </table>
+        <div style="font:400 16px var(--font-body);color:var(--text-muted);padding:12px 0 4px">Best score on a hole is bold · ○ means not played</div>
       </div>
       <div class="row" style="gap:14px">
         <button class="btn primary" data-action="confirm" style="min-width:440px"><span>${st.ui.is_last ? "See results" : `Build hole ${st.ui.next_hole}`}</span>${RG.btnHint("confirm")}</button>
@@ -752,7 +788,8 @@ S.S18 = function (st) {
       <div class="kicker" style="color:var(--player-text);opacity:.65">Champion · ${st.game.holes} holes</div>
       <div style="font:800 190px/1.15 var(--font-display);letter-spacing:-.05em;overflow:hidden">${marquee(c.name)}</div>
       <div style="font:700 40px var(--font-display);opacity:.8">${c.total} strokes · ${c.vs_par}</div>
-      <div style="margin-top:auto;height:280px;border-radius:20px;background:repeating-linear-gradient(45deg,rgba(var(--ground-rgb),.18) 0 14px,rgba(var(--ground-rgb),.08) 14px 28px);position:relative">
+      <div style="margin-top:auto;height:280px;border-radius:20px;overflow:hidden;position:relative;background:repeating-linear-gradient(45deg,rgba(var(--ground-rgb),.18) 0 14px,rgba(var(--ground-rgb),.08) 14px 28px)">
+        ${st.ui.snapshot ? `<img src="${esc((st.ui.snapshot_url || "/snapshot.jpg") + (typeof location !== "undefined" ? location.search : ""))}" alt="" style="width:100%;height:100%;object-fit:cover">` : ""}
         <span class="pill" style="position:absolute;left:16px;bottom:16px;background:var(--player-text);color:var(--text);font:400 15px monospace">live snapshot from color camera · winning putt</span>
       </div>
     </div>
@@ -766,8 +803,13 @@ S.S18 = function (st) {
       </div>`).join("")}
       <div class="kicker">Night stats</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="card" style="border-radius:18px;padding:18px 22px"><div class="kicker">Total strokes</div><div style="font:800 34px/1 var(--font-display)">${stats.total_strokes}</div></div>
-        <div class="card" style="border-radius:18px;padding:18px 22px"><div class="kicker">Holes played</div><div style="font:800 34px/1 var(--font-display)">${stats.holes_played}</div></div>
+        ${(stats.cards || [
+          { label: "Total strokes", value: stats.total_strokes, color: "#8be9c3" },
+          { label: "Holes played", value: stats.holes_played, color: "#8be9c3" },
+        ]).map((card) => `<div class="card" style="border-radius:18px;padding:18px 22px">
+          <div class="kicker">${esc(card.label)}</div>
+          <div class="row" style="gap:10px;margin-top:4px">${dot(card.color || "#8be9c3", 16)}<div style="font:800 34px/1 var(--font-display)">${esc(card.value)}</div></div>
+        </div>`).join("")}
       </div>
       <div class="row" style="margin-top:auto;gap:14px">
         <button class="btn primary" data-action="again"><span>Play again</span>${RG.btnHint("confirm")}</button>
@@ -853,10 +895,12 @@ S.S19 = function (st) {
     ? settingsCard("Players", "Saved names & colors", `<div class="col" style="gap:10px;margin-top:14px">${players.map((p) => `<div class="row" style="background:var(--fill-quiet);border-radius:14px;padding:12px 16px">${dot(p.color, 32)}<span style="font:700 24px var(--font-display)">${esc(p.name)}</span><span style="margin-left:auto;font:400 16px var(--font-body);color:var(--text-muted)">${esc(p.hue_name || "")}</span></div>`).join("")}</div>`)
     : settingsCard("Players", "No players yet", `<div style="font:400 17px var(--font-body);color:var(--text-muted);margin-top:8px">Players are created during setup when you put colored balls on the floor (step 5).</div>`);
 
+  const measuredFps = cam.measured_fps != null ? cam.measured_fps : (sensor && sensor.fps);
   const facts = sensor ? [
     ["In use", sensor.model],
     ["Color", `${sensor.color_res[0]} × ${sensor.color_res[1]}`],
     ["Depth", (sensor.depth_res && sensor.depth_res[0]) ? `${sensor.depth_res[0]} × ${sensor.depth_res[1]}` : "— (color only)"],
+    ["Measured fps", measuredFps != null ? `${Number(measuredFps).toFixed(1)} fps` : "—"],
     ["Field of view", `${sensor.fov_h_deg}°`],
     ["Reliable range", `${sensor.reliable_min_m} – ${sensor.reliable_max_m} m`],
     ["Note", sensor.note || ""],
@@ -869,10 +913,23 @@ S.S19 = function (st) {
     ? `<div class="warn-banner" style="margin-bottom:12px">Still on the mock sensor. Selected device is <strong>${esc(selectedName)}</strong>. Click Apply camera — close any other app using it first.</div>`
     : "";
   const err = cam.error ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.error)}</div>` : "";
+  const lockNotice = cam.lock_notice ? `<div class="warn-banner" style="margin-bottom:12px">${esc(cam.lock_notice)}</div>` : "";
+  const exp = cam.exposure != null ? cam.exposure : ((s.camera && s.camera.exposure) != null ? s.camera.exposure : -6);
+  const debugOn = !!(s.display && s.display.debugOverlay);
   const cameraTab = `
-    ${mockWarn}${err}
+    ${mockWarn}${err}${lockNotice}
     ${settingsCard("Live preview", "What this camera sees right now", `<div class="feed-slot" data-feed-slot style="margin-top:14px;aspect-ratio:16/9;border-radius:16px"></div>`)}
     ${settingsCard("Sensor", "What is actually attached right now", `<dl class="s-fact">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`)}
+    ${settingsCard("Exposure", "Shorter (more negative) keeps a rolling ball sharp. Default −6 is about 1/64 s.", `
+      <div class="s-inline" style="margin-top:14px">
+        <span class="text-muted" style="width:120px">Exposure</span>
+        <input class="slider grow" type="range" min="-8" max="-4" step="1" value="${exp}" data-set-camera-exposure>
+        <span data-exposure-label style="font:700 18px var(--font-display);width:56px;text-align:right">${exp}</span>
+      </div>`)}
+    <div class="s-card s-inline">
+      <div class="grow"><div style="font:700 20px var(--font-display)">Tracking debug overlay</div><div class="s-card-desc">Draws fps, ball masks, accepted / rejected detections, and the gate radius on the live feed.</div></div>
+      <button type="button" class="toggle ${debugOn ? "on" : ""}" data-set-debug-overlay><span class="knob"></span></button>
+    </div>
     ${settingsCard("Camera input", "Choose which device watches the floor", `
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px">
         <div class="s-form-row"><label>Device</label>

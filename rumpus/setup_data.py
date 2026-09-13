@@ -78,6 +78,9 @@ class Setup:
                 id=p.get("id", ""), name=p.get("name", ""), color=p.get("color", ""),
                 hue_name=p.get("hue_name", ""),
                 hue_range=tuple(p["hue_range"]) if p.get("hue_range") else None,
+                hue_center=float(p["hue_center"]) if p.get("hue_center") is not None else None,
+                sat_floor=int(p["sat_floor"]) if p.get("sat_floor") is not None else None,
+                val_floor=int(p["val_floor"]) if p.get("val_floor") is not None else None,
                 order=p.get("order", 0),
             ))
         fp = d.get("floor_plane")

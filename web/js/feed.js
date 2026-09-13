@@ -5,7 +5,7 @@ window.RG = window.RG || {};
 
 (function () {
   const HANDLE_PX = 36;
-  let wrap = null, canvas = null, ctx = null, svg = null;
+  let wrap = null, canvas = null, ctx = null, svg = null, htmlLayer = null;
   let pointerDown = false;
   let lastShapes = [];
   let lastOverlayKey = "";
@@ -21,9 +21,10 @@ window.RG = window.RG || {};
     if (wrap) return;
     wrap = document.createElement("div");
     wrap.className = "feed-wrap hidden";
-    wrap.innerHTML = `<canvas class="feed"></canvas><svg class="overlay" xmlns="http://www.w3.org/2000/svg"></svg>`;
+    wrap.innerHTML = `<canvas class="feed"></canvas><svg class="overlay" xmlns="http://www.w3.org/2000/svg"></svg><div class="overlay-html"></div>`;
     canvas = wrap.querySelector("canvas");
     svg = wrap.querySelector("svg");
+    htmlLayer = wrap.querySelector(".overlay-html");
     ctx = canvas.getContext("2d");
     if (typeof ResizeObserver !== "undefined") {
       new ResizeObserver(() => size()).observe(wrap);
@@ -40,6 +41,7 @@ window.RG = window.RG || {};
       const p = norm(e);
       const msg = { t: "pointer", type, x: Math.min(1, Math.max(0, p.x)), y: Math.min(1, Math.max(0, p.y)) };
       if (handle != null) msg.handle = handle;
+      if (e && e.shiftKey) msg.shift = true;
       RG.send(msg);
     };
     const flushMove = () => {
@@ -103,6 +105,8 @@ window.RG = window.RG || {};
   }
 
   function parseHandleId(id) {
+    const o = /^o(\d+)c(\d+)$/.exec(id);
+    if (o) return `o:${o[1]}:${o[2]}`;
     const g = /^g(\d+)c(\d+)$/.exec(id);
     if (g) return `${g[1]}:${g[2]}`;
     if (id.startsWith("corner")) {
@@ -114,6 +118,21 @@ window.RG = window.RG || {};
 
   function applyLocalCorner(handle, x, y) {
     let circleId = null, polyId = null, idx = null;
+    if (typeof handle === "string" && handle.startsWith("o:")) {
+      const parts = handle.split(":");
+      circleId = `o${parts[1]}c${parts[2]}`;
+      polyId = null;
+      idx = parseInt(parts[2], 10);
+      for (const s of lastShapes) {
+        if (s.type === "polygon" && s.id && String(s.id).startsWith("obstacle_")) {
+          if (s.pts && s.pts[idx]) { s.pts[idx] = [x, y]; }
+        }
+        if (s.id === circleId) { s.x = x; s.y = y; }
+      }
+      lastOverlayKey = "";
+      renderSvg(lastShapes);
+      return;
+    }
     if (typeof handle === "string" && handle.includes(":")) {
       const [gi, ci] = handle.split(":");
       circleId = `g${gi}c${ci}`;
@@ -228,7 +247,12 @@ window.RG = window.RG || {};
 
   function renderSvg(shapes) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (htmlLayer) htmlLayer.innerHTML = "";
     for (const s of shapes) {
+      if (s.type === "html") {
+        addHtmlLabel(s);
+        continue;
+      }
       if (s.type === "polygon" || s.type === "polyline") {
         const pts = (s.pts || []).map((p) => `${p[0]},${p[1]}`).join(" ");
         const p = svgEl(s.type === "polyline" ? "polyline" : "polygon", {
@@ -241,6 +265,8 @@ window.RG = window.RG || {};
           "stroke-linejoin": "round",
           "stroke-linecap": "round",
         });
+        if (s.opacity != null) p.setAttribute("opacity", s.opacity);
+        if (s.class) p.setAttribute("class", s.class);
         svg.appendChild(p);
         if (s.label) addLabel(s.pts && s.pts[0], s.label, s.stroke || "#fff");
       } else if (s.type === "label") {
@@ -249,14 +275,27 @@ window.RG = window.RG || {};
         const c = svgEl("circle", {
           cx: s.x, cy: s.y, r: s.r,
           fill: s.fill || "none",
-          stroke: s.stroke || "#fff",
+          stroke: s.stroke || "none",
           "stroke-width": (s.stroke_width || 3) * 0.0015,
           "stroke-dasharray": s.dash || "",
         });
+        if (s.opacity != null) c.setAttribute("opacity", s.opacity);
+        if (s.class) c.setAttribute("class", s.class);
         svg.appendChild(c);
         if (s.label) addLabel([s.x, s.y], s.label, s.fill === "#8be9c3" ? "#8be9c3" : "#f2efe8");
       }
     }
+  }
+
+  function addHtmlLabel(s) {
+    if (!htmlLayer || !s.text) return;
+    const el = document.createElement("div");
+    el.className = s.class || "overlay-outline-label";
+    el.textContent = s.text;
+    el.style.left = (s.x * 100) + "%";
+    el.style.top = (s.y * 100) + "%";
+    if (s.color) el.style.color = s.color;
+    htmlLayer.appendChild(el);
   }
 
   function addLabel(pos, text, color, opts) {

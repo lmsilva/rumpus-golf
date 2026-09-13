@@ -54,3 +54,21 @@ class SensorBackend(ABC):
 
     def is_open(self) -> bool:
         return True
+
+    def lock_capture(self, exposure: float | None = None) -> None:
+        """Freeze auto exposure / white balance for play. No-op unless webcam."""
+
+    def unlock_capture(self) -> None:
+        """Restore auto exposure / white balance. No-op unless webcam."""
+
+    def set_exposure(self, value: float) -> None:
+        """Set a fixed exposure (webcam log2 seconds). No-op on other backends."""
+
+    def capture_status(self) -> dict:
+        """Lock / fps facts for the Settings camera tab."""
+        return {
+            "measured_fps": float(getattr(self.description, "fps", 30) or 30),
+            "locked": False,
+            "exposure": None,
+            "ignored": [],
+        }

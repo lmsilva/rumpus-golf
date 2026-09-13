@@ -1,11 +1,11 @@
 # Rumpus Golf — Python 3.11+
-# Core runtime (required)
-numpy>=1.24
-opencv-python>=4.8
-
-# Local web server + websocket (required)
-fastapi>=0.110
-uvicorn[standard]>=0.29
+# Exact pins of the four runtime packages as installed in this project.
+# Pinned deliberately so a later pip install cannot silently pick a new
+# major and break the local game server.
+numpy==2.4.6
+opencv-python==5.0.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 
 # Optional sensor drivers (only needed when real hardware is attached)
 #   Kinect v1 (Xbox 360): libfreenect + Python bindings

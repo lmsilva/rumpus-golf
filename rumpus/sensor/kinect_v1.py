@@ -65,6 +65,12 @@ class KinectV1Backend(SensorBackend):
     def is_open(self) -> bool:
         return self._opened
 
+    def lock_capture(self, exposure: float | None = None) -> None:
+        return
+
+    def unlock_capture(self) -> None:
+        return
+
     def grab(self) -> Frame:
         f = self._freenect
         try:

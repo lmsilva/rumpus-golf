@@ -14,7 +14,7 @@ The screens and behaviour are identical for every input. The prototype runs on a
 Everything else — course, obstacles, cup, balls, gameplay — is the same flow. See `README.md` (repo root) and the POC spec for the limitations of a regular camera versus a Kinect.
 
 ## About the design files
-`design/Rumpus Golf Flow v2.dc.html` is a **design reference built in HTML** — a static artboard document (1920×1080 frames) showing intended look and behaviour. It is **not production code**. Recreate the screens in the target stack using its patterns; if no UI stack exists yet, the recommended choice (per the POC's portability rule) is **PySide6/QML** or a **locally-served browser UI** driven by the Python game loop over a websocket. Do not use WinForms/WPF.
+`design/Rumpus Golf Flow v2.dc.html` is a **design reference built in HTML** — a static artboard document (1920×1080 frames) showing intended look and behaviour. It is **not production code**. Opening these design HTML files fetches React and Babel from unpkg; they are not part of the served application. Recreate the screens in the target stack using its patterns; if no UI stack exists yet, the recommended choice (per the POC's portability rule) is **PySide6/QML** or a **locally-served browser UI** driven by the Python game loop over a websocket. Do not use WinForms/WPF.
 
 `design/Rumpus Golf Flow.dc.html` (v1) is an earlier, rejected visual direction — included only for history. Build v2.
 
