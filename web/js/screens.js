@@ -76,8 +76,8 @@ S.S01 = function (st) {
       <h1 style="font:800 200px/1 var(--font-display);letter-spacing:-.05em">Rumpus<br>Golf</h1>
       <div style="font:400 32px/1.3 var(--font-body);color:var(--text-muted);margin-top:28px;max-width:720px">Turn any floor into a mini golf course.</div>
     </div>
-    <div class="col" style="margin-top:56px;max-width:560px;gap:12px">
-      ${items.map((it) => `<button class="btn ${it.cls} stretch" data-action="${it.action}"><span>${esc(it.label)}</span>${it.meta ? `<span class="meta">${esc(it.meta)}</span>` : ""}${it.verb ? RG.btnHint(it.verb) : ""}</button>`).join("")}
+    <div class="col" style="margin-top:56px;max-width:560px;width:100%;overflow:hidden;gap:12px">
+      ${items.map((it) => `<button class="btn ${it.cls} stretch" data-action="${it.action}"><span>${esc(it.label)}</span>${it.meta ? `<span class="meta marquee" data-marquee><span>${esc(it.meta)}</span></span>` : ""}${it.verb ? RG.btnHint(it.verb) : ""}</button>`).join("")}
     </div>
   </div>
   <div class="pill" style="position:absolute;right:56px;bottom:48px;padding:14px 20px;font:600 17px var(--font-body)">

@@ -50,7 +50,9 @@ window.RG = window.RG || {};
       lastSignature = sig;
       wire();
       applyMarquee();
-      if (screen === "S15" && focusPauseRow(st)) {
+      if (screen === "S06" && focusSelectedCourse()) {
+        /* course tile highlight is the selected card, not a leftover DOM node */
+      } else if (screen === "S15" && focusPauseRow(st)) {
         /* mint highlight is server-driven — follow it, not the old DOM node */
       } else if (!restoreFocus(keep)) {
         focusFirst();
@@ -198,7 +200,7 @@ window.RG = window.RG || {};
         const msg = { t: "action", a };
         if (el.hasAttribute("data-index")) msg.index = parseInt(el.getAttribute("data-index"), 10);
         if (a === "select" && el.classList.contains("course-card")) {
-          scene.querySelectorAll(".course-card").forEach((c) => c.classList.toggle("is-selected", c === el));
+          paintCourseSelection(el);
         }
         RG.send(msg);
         e.stopPropagation();
@@ -327,6 +329,47 @@ window.RG = window.RG || {};
     el.focus({ preventScroll: true });
     markFocus(el);
     try { el.scrollIntoView({ block: "nearest" }); } catch (err) {}
+    syncCourseHighlight(el);
+  }
+  function paintCourseSelection(card) {
+    if (!card) return;
+    scene.querySelectorAll(".course-card").forEach((c) => {
+      const on = c === card;
+      c.classList.toggle("is-selected", on);
+      const btn = c.querySelector("button.btn[data-action=confirm]");
+      if (!btn) return;
+      btn.classList.toggle("primary", on);
+      btn.classList.toggle("secondary", !on);
+      if (on) btn.style.removeProperty("background");
+      else btn.style.background = "rgba(242,239,232,.08)";
+      const label = btn.querySelector(":scope > span:first-child");
+      if (label) label.textContent = on ? "Use this course" : "Choose";
+    });
+  }
+  function syncCourseHighlight(el) {
+    if (!state || state.screen !== "S06") return;
+    const card = el && el.closest ? el.closest(".course-card") : null;
+    if (!card || card.classList.contains("is-selected")) return;
+    paintCourseSelection(card);
+    const idx = parseInt(card.getAttribute("data-index"), 10);
+    if (!Number.isNaN(idx)) RG.send({ t: "action", a: "select", index: idx });
+  }
+  function focusSelectedCourse() {
+    const card = scene.querySelector(".course-card.is-selected") || scene.querySelector(".course-card");
+    if (!card) return false;
+    activate(card);
+    return true;
+  }
+  function courseArrow(dir) {
+    scene.classList.remove("mouse-nav");
+    const cards = Array.from(scene.querySelectorAll(".course-card"));
+    if (!cards.length) { moveFocus2d(dir.dx || 0, dir.dy || 0); return; }
+    const ae = document.activeElement;
+    const cur = (ae && ae.closest && ae.closest(".course-card")) || cards.find((c) => c.classList.contains("is-selected"));
+    let i = cards.indexOf(cur);
+    if (i < 0) i = 0;
+    const step = dir.dx || dir.dy || 1;
+    activate(cards[(i + step + cards.length) % cards.length]);
   }
   function moveFocus(delta) {
     const els = focusables();
@@ -395,6 +438,7 @@ window.RG = window.RG || {};
     RG.send({ t: "action", a: (dir.dy > 0 || dir.dx > 0) ? "down" : "up" });
   }
   function focusFirst() {
+    if (state && state.screen === "S06" && focusSelectedCourse()) return;
     if (state && state.screen === "S15" && focusPauseRow(state)) return;
     const els = focusables();
     const first = els.find((el) => el.tagName === "BUTTON" && el.getAttribute("data-action") !== "back") || els[0];
@@ -433,6 +477,13 @@ window.RG = window.RG || {};
     if (key === "ArrowDown" || key === "ArrowUp" || key === "ArrowRight" || key === "ArrowLeft") {
       e.preventDefault();
       scene.classList.remove("mouse-nav");
+      if (state && state.screen === "S06") {
+        courseArrow({
+          dx: key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0,
+          dy: key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : 0,
+        });
+        return;
+      }
       if (state && state.screen === "S15") {
         pauseArrow({
           dx: key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0,
@@ -452,6 +503,13 @@ window.RG = window.RG || {};
 
     // Activate the focused control, else send a generic confirm.
     if (key === "Enter" || key === " ") {
+      if (ae && ae.classList && ae.classList.contains("course-card")) {
+        e.preventDefault();
+        const btn = ae.querySelector("[data-action=confirm]");
+        if (btn) btn.click();
+        else RG.send({ t: "action", a: "confirm", index: parseInt(ae.getAttribute("data-index"), 10) });
+        return;
+      }
       if (ae && ae !== document.body && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
         e.preventDefault();
         ae.click();
@@ -522,6 +580,12 @@ window.RG = window.RG || {};
     scene.classList.remove("mouse-nav");
     if (verb === "confirm") {
       const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("course-card")) {
+        const btn = ae.querySelector("[data-action=confirm]");
+        if (btn) btn.click();
+        else RG.send({ t: "action", a: "confirm", index: parseInt(ae.getAttribute("data-index"), 10) });
+        return;
+      }
       if (ae && scene.contains(ae) && (ae.tagName === "BUTTON" || (ae.hasAttribute && ae.hasAttribute("data-action")))) {
         ae.click();
       } else {
@@ -587,6 +651,7 @@ window.RG = window.RG || {};
       scene.classList.remove("mouse-nav");
       const step = () => {
         if (state && state.screen === "S15") pauseArrow({ dx, dy });
+        else if (state && state.screen === "S06") courseArrow({ dx, dy });
         else moveFocus2d(dx, dy);
       };
       if (stickReady) {
