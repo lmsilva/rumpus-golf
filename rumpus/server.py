@@ -131,7 +131,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
     input_queue: queue.Queue = queue.Queue(maxsize=INPUT_QUEUE_SIZE)
     stop = threading.Event()
 
-    def open_sensor():
+    def open_sensor(report: dict | None = None):
         """Open the camera off the game loop so the boot menu stays interactive."""
         cfg = engine.settings.get("camera", default={}) or {}
         idx = camera_index if camera_index is not None else int(cfg.get("device", 0))
@@ -142,7 +142,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
         backend, _kind = create_backend(
             force=force_sensor, allow_mock=use_mock,
             camera_index=idx, camera_res=res, backend_mode=mode,
-            settings=engine.settings,
+            settings=engine.settings, report=report,
         )
         if backend is None:
             return None, None
@@ -202,7 +202,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
 
         def init_worker() -> None:
             try:
-                backend, cam = open_sensor()
+                backend, cam = open_sensor(report=opened)
                 opened["backend"] = backend
                 opened["cam"] = cam
             except Exception as exc:
@@ -232,7 +232,9 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                     )
                 elif opened["backend"] is None:
                     engine.sensor_status = "none"
-                    engine._camera_error = (
+                    # A named cause ("your Kinect has no driver library") is
+                    # worth far more than the generic busy-device guess.
+                    engine._camera_error = opened.get("reason") or (
                         "Could not open the camera. Close Zoom / Teams / Iriun "
                         "if it has the device, then press Retry."
                     )
@@ -244,6 +246,12 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                             if not reopen(full=False) and not reopen(full=True):
                                 raise RuntimeError("webcam reopen failed")
                         engine.attach_backend(backend, opened["cam"])
+                        # Attaching clears the error, so a "your Kinect is
+                        # plugged in but unusable" note has to be re-applied —
+                        # otherwise the fallback to the webcam looks like the
+                        # Kinect was never seen at all.
+                        if opened.get("reason"):
+                            engine._camera_error = str(opened["reason"])
                     except Exception:
                         import traceback
                         traceback.print_exc()

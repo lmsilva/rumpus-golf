@@ -321,10 +321,11 @@ class GameEngine:
             self.backend = None
 
         # Never fall back to the mock during an explicit Settings change.
+        report: dict = {}
         backend, _kind = create_backend(
             force=None, allow_mock=False,
             camera_index=index, camera_res=res, backend_mode=mode,
-            settings=self.settings,
+            settings=self.settings, report=report,
         )
 
         # The live calibration belongs to the device we just closed.
@@ -337,7 +338,9 @@ class GameEngine:
         if backend is None:
             self.sensor_status = "none"
             self.sensor_desc = None
-            self._camera_error = (
+            # Prefer the specific reason (e.g. a Kinect with no driver library)
+            # over the generic "something else has the device".
+            self._camera_error = report.get("reason") or (
                 "Could not open that camera. Close Zoom / Teams / Iriun if it "
                 "has the device, then click Apply camera."
             )
@@ -354,7 +357,9 @@ class GameEngine:
         # leave tracking dead until the user recalibrates by hand.
         self._restore_floor_mapping()
         self._seed_tracker_from_positions()
-        self._camera_error = ""
+        # A substitute opened, so say what the requested sensor is missing
+        # rather than reporting plain success.
+        self._camera_error = report.get("reason", "")
         return True
 
     # ===================================================================== #

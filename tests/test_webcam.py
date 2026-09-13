@@ -179,6 +179,43 @@ def test_base_backend_driver_settings_is_noop():
     assert b.open_driver_settings() is False
 
 
+def test_unusable_kinect_explains_itself_and_falls_back_to_the_webcam():
+    """A detected-but-unopenable Kinect must not look like "no camera"."""
+    from unittest.mock import patch
+
+    import rumpus.sensor as sensor
+
+    fake_webcam = object()
+    with patch.object(sensor.detect, "detect_sensor", return_value="v1"), \
+         patch.object(sensor, "_try_open", return_value=None), \
+         patch.object(sensor, "_open_webcam", return_value=fake_webcam):
+        report: dict = {}
+        backend, kind = sensor.create_backend(
+            backend_mode="kinect", allow_mock=True, report=report,
+        )
+    # The 2D camera, not the mock: a simulated scene is useless for a real putt.
+    assert backend is fake_webcam and kind == "webcam"
+    reason = report.get("reason", "")
+    assert "Kinect v1" in reason and "freenect" in reason
+
+
+def test_kinect_absent_from_usb_names_the_power_adapter():
+    """The camera never enumerates on bus power alone — say so."""
+    from unittest.mock import patch
+
+    import rumpus.sensor as sensor
+
+    with patch.object(sensor.detect, "detect_sensor", return_value=None), \
+         patch.object(sensor, "_try_open", return_value=None), \
+         patch.object(sensor, "_open_webcam", return_value=None):
+        report: dict = {}
+        backend, kind = sensor.create_backend(
+            backend_mode="kinect", allow_mock=False, report=report,
+        )
+    assert backend is None and kind == "none"
+    assert "12 V" in report.get("reason", "")
+
+
 if __name__ == "__main__":
     test_frame_has_picture_rejects_black()
     test_fourcc_name_roundtrip()
@@ -192,4 +229,6 @@ if __name__ == "__main__":
     test_detach_handle_drops_cap()
     test_grab_recovers_after_misses()
     test_base_backend_driver_settings_is_noop()
+    test_unusable_kinect_explains_itself_and_falls_back_to_the_webcam()
+    test_kinect_absent_from_usb_names_the_power_adapter()
     print("ok")
