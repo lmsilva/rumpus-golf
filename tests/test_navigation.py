@@ -166,6 +166,41 @@ def test_hole_complete_back_pauses():
     assert e.state == S.PAUSE
 
 
+def test_a_capture_that_collected_nothing_still_finishes():
+    """Otherwise the cup step waits for a scan that already ended.
+
+    A window that saw no depth leaves nothing to average, and the old code only
+    cleared the deadline when there *was* an average — so the completion handler
+    re-fired on every tick for the rest of the session.
+    """
+    e = GameEngine()
+    e._save_setup = lambda: None
+    e.state = S.CAL_CUP
+    e._start_capture(1.5, "cup")
+    e._cup_searching = True
+    assert e._capture_until > 0
+
+    calls = []
+    e._on_capture_done = lambda: calls.append(1)   # collected nothing
+    e._process_timers(e._capture_until + 0.1)
+    assert e._capture_until == 0.0, "deadline still armed after the window ended"
+    assert len(calls) == 1
+
+    # Later ticks must not re-run it.
+    e._process_timers(e._capture_until + 10.0)
+    assert len(calls) == 1, f"handler re-ran {len(calls)} times"
+
+
+def test_the_cup_search_ends_even_with_no_depth_to_scan():
+    e = GameEngine()
+    e._save_setup = lambda: None
+    e.state = S.CAL_CUP
+    e._start_cup_search()
+    assert e._cup_searching is True
+    e._process_timers(e._capture_until + 0.1)
+    assert e._cup_searching is False, "still 'looking for a still cup' forever"
+
+
 if __name__ == "__main__":
     test_play_back_pauses_and_resume_returns()
     test_game_start_back_returns_to_balls_not_pause()
@@ -181,4 +216,6 @@ if __name__ == "__main__":
     test_quit_clears_round_and_lands_on_boot()
     test_resume_never_returns_to_boot_mid_round()
     test_hole_complete_back_pauses()
+    test_a_capture_that_collected_nothing_still_finishes()
+    test_the_cup_search_ends_even_with_no_depth_to_scan()
     print("ok")

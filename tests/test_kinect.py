@@ -123,6 +123,55 @@ def test_registration_drops_invalid_depth():
 # --------------------------------------------------------------------------- #
 # Backend selection
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Draining the runtime's frame queue
+# --------------------------------------------------------------------------- #
+def _drainer(available: int):
+    """A backend whose stream yields ``available`` frames, then nothing."""
+    be = kn.KinectNuiBackend.__new__(kn.KinectNuiBackend)
+    left = {"n": available}
+
+    def one(_stream):
+        if left["n"] <= 0:
+            return None
+        left["n"] -= 1
+        return b"frame"
+
+    be._one = one
+    return be, left
+
+
+def test_drain_takes_the_freshest_and_skips_the_backlog():
+    be, left = _drainer(3)
+    assert be._newest("s") == b"frame"
+    assert left["n"] == 0, "left a queued frame behind"
+
+
+def test_drain_returns_none_when_nothing_arrived():
+    be, _ = _drainer(0)
+    assert be._newest("s") is None
+
+
+def test_drain_is_bounded_when_frames_never_stop_arriving():
+    """The freeze with no error anywhere.
+
+    The sensor keeps producing while we copy 1.2 MB per frame out, so a loop
+    that runs until the queue is empty may never get there.
+    """
+    be = kn.KinectNuiBackend.__new__(kn.KinectNuiBackend)
+    calls = {"n": 0}
+
+    def endless(_stream):
+        calls["n"] += 1
+        if calls["n"] > 10000:
+            raise AssertionError("drain loop is unbounded")
+        return b"frame"
+
+    be._one = endless
+    assert be._newest("s", limit=4) == b"frame"
+    assert calls["n"] == 4, f"drained {calls['n']} frames instead of 4"
+
+
 def test_v1_prefers_the_microsoft_runtime_over_libfreenect():
     """libfreenect needs the working KinectCamera driver replaced. Avoid it."""
     order: list[str] = []
@@ -281,6 +330,9 @@ if __name__ == "__main__":
     test_registration_keeps_the_nearer_surface()
     test_registration_leaves_no_holes_across_a_flat_surface()
     test_registration_drops_invalid_depth()
+    test_drain_takes_the_freshest_and_skips_the_backlog()
+    test_drain_returns_none_when_nothing_arrived()
+    test_drain_is_bounded_when_frames_never_stop_arriving()
     test_v1_prefers_the_microsoft_runtime_over_libfreenect()
     test_v1_falls_back_to_libfreenect_when_the_runtime_is_absent()
     test_unusable_kinect_explains_itself_and_falls_back_to_the_webcam()

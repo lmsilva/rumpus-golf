@@ -14,8 +14,8 @@ import numpy as np
 
 from ..models import CameraModel, FloorPlane
 from ..vision.blobs import (above_floor_mask, connected_regions, contour_to_floor,
-                            contour_to_floor_pixels, height_map, largest_contour,
-                            simplify_polygon)
+                            contour_to_floor_pixels, denoise_mask, height_map,
+                            largest_contour, simplify_polygon)
 from ..vision.geometry import FloorMapper
 
 
@@ -45,7 +45,12 @@ def detect_obstacles(
     """Return proposed obstacles: {polygon, confidence, area_m2, label_kind}."""
     hmap = height_map(average_depth, reference_plane, cam)
     mask = above_floor_mask(hmap, min_height_m=min_height_m)
-    regions = connected_regions(mask, min_area=12)
+    # Sensor noise alone clears a low height threshold, and every speckle it
+    # leaves would be proposed as an object to confirm.
+    mask = denoise_mask(mask, open_px=3)
+    # A room has a handful of things on the floor, not fifty. Bounding this
+    # keeps a noisy frame from turning into thousands of outline traces.
+    regions = connected_regions(mask, min_area=12, max_regions=48)
     proposals: list[dict] = []
     for r in regions:
         cx, cy = r["center"]
@@ -119,7 +124,7 @@ def detect_obstacles_color(
     _, mask = cv2.threshold(diff, diff_thresh, 255, cv2.THRESH_BINARY)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
-    regions = connected_regions(mask, min_area=min_area_px)
+    regions = connected_regions(mask, min_area=min_area_px, max_regions=48)
     proposals: list[dict] = []
     for r in regions:
         cx, cy = r["center"]

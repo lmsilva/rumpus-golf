@@ -421,19 +421,26 @@ class KinectNuiBackend(SensorBackend):
             except OSError:
                 pass
 
-    def _newest(self, stream) -> bytes | None:
+    def _newest(self, stream, limit: int = 4) -> bytes | None:
         """The freshest frame on a stream, discarding any backlog.
 
         The runtime queues frames, and a putt is fast enough that tracking a
         queued one would draw the ball where it used to be. None means nothing
         arrived since the last call, which is not an error.
+
+        Bounded because the sensor is still producing while we drain: if frames
+        arrive at least as fast as they can be copied out — 1.2 MB each — an
+        unbounded loop never reaches the end of the queue, and the game freezes
+        with no error anywhere. Four is well past the two or three a slow tick
+        can leave behind.
         """
         buf = None
-        while True:
+        for _ in range(max(1, limit)):
             got = self._one(stream)
             if got is None:
-                return buf
+                break
             buf = got
+        return buf
 
     def grab(self) -> Frame:
         """Latest color plus registered depth.

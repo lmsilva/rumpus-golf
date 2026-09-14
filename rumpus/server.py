@@ -15,8 +15,10 @@ import json
 import logging
 import queue
 import secrets
+import sys
 import threading
 import time
+import traceback
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -27,6 +29,10 @@ from fastapi.staticfiles import StaticFiles
 log = logging.getLogger("rumpus.server")
 
 WS_MAX_TEXT = 4096
+# A game loop cycle this long is a visible freeze, not jitter, so it gets named.
+SLOW_CYCLE_S = 0.75
+# And one this long is not going to recover on its own: dump where it is stuck.
+WATCHDOG_S = 5.0
 INPUT_QUEUE_SIZE = 256
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -157,7 +163,36 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
         )
         return backend, cam
 
+    # Heartbeat so a wedged game loop can be told apart from a merely slow one.
+    beat = {"at": time.time(), "state": "BOOT", "tid": 0}
+
+    def watchdog() -> None:
+        """Name the call a frozen game loop is stuck in.
+
+        Every phase of the loop is exception-guarded, so a hang produces no
+        output at all — the picture just stops. Printing the loop's own stack
+        turns "it crashed" into a file and line number.
+        """
+        warned = False
+        while not stop.is_set():
+            time.sleep(1.0)
+            behind = time.time() - beat["at"]
+            if behind < WATCHDOG_S:
+                warned = False
+                continue
+            if warned:
+                continue
+            warned = True
+            frames = sys._current_frames()
+            frame = frames.get(beat["tid"])
+            print(f"[watchdog] game loop stuck {behind:.1f}s in {beat['state']}",
+                  flush=True)
+            if frame is not None:
+                print("".join(traceback.format_stack(frame)), flush=True)
+
     def loop() -> None:
+        beat["tid"] = threading.get_ident()
+
         def drain_input() -> None:
             last_move = None
             while True:
@@ -219,6 +254,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
             traceback.print_exc()
 
         attached = False
+        stale_noted = False
         while not stop.is_set():
             if opened["done"] and not attached:
                 attached = True
@@ -262,8 +298,11 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                             "Could not open the camera. Close Zoom / Teams / Iriun "
                             "if it has the device, then press Retry."
                         )
+            beat["at"] = time.time()
+            beat["state"] = engine.state
             started = time.perf_counter()
             frame = engine.grab_frame()
+            grabbed = time.perf_counter()
             interval = 0.1
             if engine.backend is not None:
                 try:
@@ -283,6 +322,20 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
                 traceback.print_exc()
                 time.sleep(0.2)
                 continue
+            # Say where a stall happened. Everything in here is guarded, so a
+            # freeze shows up as silence rather than a traceback: no way to tell
+            # a wedged sensor from slow vision from a dead browser without a
+            # timing line naming the phase and the screen.
+            done = time.perf_counter()
+            if done - started > SLOW_CYCLE_S:
+                print(f"[slow] {engine.state}: grab {(grabbed - started) * 1000:.0f} ms, "
+                      f"tick+publish {(done - grabbed) * 1000:.0f} ms", flush=True)
+            if engine._feed_stale and not stale_noted:
+                stale_noted = True
+                print(f"[feed] stream went stale in {engine.state} "
+                      f"({engine._camera_error})", flush=True)
+            elif not engine._feed_stale:
+                stale_noted = False
             if frame is None:
                 time.sleep(0.1)
                 continue
@@ -293,6 +346,7 @@ def make_app(force_sensor: str | None = None, allow_mock: bool = True,
             time.sleep(max(0.0, interval - (time.perf_counter() - started)))
 
     thread = threading.Thread(target=loop, daemon=True)
+    threading.Thread(target=watchdog, daemon=True, name="rumpus-watchdog").start()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

@@ -15,7 +15,8 @@ import cv2
 import numpy as np
 
 from ..models import CameraModel
-from ..vision.blobs import above_floor_mask, connected_regions, height_map
+from ..vision.blobs import (above_floor_mask, connected_regions, denoise_mask,
+                            height_map)
 from ..vision.geometry import FloorMapper
 
 
@@ -285,6 +286,10 @@ class BallTracker:
             return []
         hmap = height_map(depth_mm, plane, cam)
         mask = above_floor_mask(hmap, min_height_m=0.005)
+        # 5 mm is well inside a real sensor's noise, which speckles the whole
+        # floor with stray pixels — thousands of candidate blobs per frame, every
+        # frame. A ball is a solid disc about ten pixels across and survives.
+        mask = denoise_mask(mask, open_px=3)
         regions = connected_regions(mask, min_area=3)
         hh, ww = depth_mm.shape[:2]
         out = []

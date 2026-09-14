@@ -243,7 +243,7 @@ S.S05 = function (st) {
   ];
   const body = colorOnly
     ? "This camera cannot measure distance. Drag a numbered corner, or Clear corners and click four new ones of a rectangle whose real size you know — tape, a rug, or the course edge."
-    : "Drag the corners, or Clear and click a new outline. Balls stopping outside are out of bounds.";
+    : "Drag the numbered corners to fit your floor, or click the floor to draw your own outline. Balls stopping outside are out of bounds.";
   const sizeKicker = colorOnly ? "How big is that rectangle?" : "Start from a preset";
   const sizeHelp = colorOnly
     ? `The webcam only sees pixels. ${w} × ${h} m is the real size of the rectangle you marked — that’s what turns those four corners into meters.`

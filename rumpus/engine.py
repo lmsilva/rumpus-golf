@@ -74,6 +74,43 @@ SCREEN_BY_STATE = {
     S.GAME_FINISH: "S18", S.SETTINGS: "S19", S.CREDITS: "S20", S.CHANGELOG: "S21",
 }
 
+# Width of the design space the overlay sizes are quoted in (see SCREENS.md).
+DESIGN_W = 1920.0
+
+# A depth camera can take any outline, not just a rectangle, but an unbounded
+# click count is a way to make the screen unusable by accident.
+MAX_AREA_CORNERS = 12
+
+# How near a click has to be to grab a play-area corner, as a fraction of the
+# frame width. About three times the 18 px handle, which puts it in the same
+# range as the browser's own 36 px pick radius: forgiving to aim at, while still
+# leaving room to put a new corner down beside an existing one. It used to be
+# 0.2 — a fifth of the picture per corner, which swallowed nearly every click.
+AREA_GRAB_R = 0.03
+
+# Seeding a preset: how much clear frame a corner needs so it is comfortably
+# grabbable rather than jammed against the edge, the sizes tried before giving
+# up on the requested one, and how finely the visible floor is searched for a
+# placement.
+PRESET_MARGIN = 0.04
+PRESET_SCALES = (1.0, 0.92, 0.84, 0.76, 0.68, 0.6, 0.52, 0.44, 0.36, 0.28)
+PRESET_GRID = 11
+
+# Keep a pointer-placed point this far inside the frame, so the handle it sets
+# stays on screen and can be picked up again.
+POINTER_MARGIN = 0.02
+
+# Hole-zone radius limits, in meters. A real cup is about 5 cm across, and the
+# zone is allowed to be generous — but not a metre wide. The keyboard grow and
+# shrink actions have always clamped to these; dragging the edge did not, so a
+# drag could blow the zone up to any size at all.
+CUP_R_MIN = 0.03
+CUP_R_MAX = 0.18
+DEFAULT_CUP_R = 0.045
+# How near the cream resize dot a click has to be to grab it instead of moving
+# the hole. Matches the play-area corners, and the browser's own pick radius.
+CUP_HANDLE_GRAB_R = 0.03
+
 FEED_STATES = {S.VERIFY, S.CAL_FLOOR, S.CAL_AREA, S.CAL_PLACE, S.CAL_OBSTACLES,
                S.CAL_CUP, S.CAL_BALLS, S.GAME_START, S.PLAY, S.TURN_CHANGE,
                S.HOLE_OUT, S.OOB, S.HOLE_START}
@@ -135,6 +172,15 @@ class GameEngine:
         self._preset_w = 3.0
         self._preset_h = 2.0
         self._preset_name = "medium"
+        # A preset rectangle nobody has touched yet. Clicking bare floor then
+        # means "draw my own outline here" rather than nudging a corner.
+        self._area_from_preset = False
+        # Set when the requested preset would not fit in view and was trimmed,
+        # so the screen can say so instead of quietly handing back a smaller one.
+        self._preset_trimmed = False
+        # False once the outline is closed, so later clicks drag corners instead
+        # of adding more.
+        self._area_open = True
 
         # Camera enumeration (for the Settings → Camera tab). Names-only so we
         # never open a device while the live backend holds it.
@@ -507,6 +553,12 @@ class GameEngine:
         # Timed capture completions.
         if self._capture_until and now >= self._capture_until:
             label = self._capture_label
+            # Disarm before dispatching. A window that collected no depth at all
+            # — a stalled stream, a color frame with no depth beside it — leaves
+            # _finish_capture with nothing to hand back and no reason to clear
+            # the deadline, and the handler would then re-run on every tick for
+            # the rest of the session.
+            self._capture_until = 0.0
             try:
                 self._on_capture_done()
             except Exception:
@@ -560,6 +612,18 @@ class GameEngine:
                 self._apply_preset("medium")
             elif not self._draw_poly:
                 self._seed_area_from_setup()
+            # An outline saved before the sensor was moved can sit entirely
+            # outside the picture. An empty feed reads as a broken screen, so
+            # drop a preset of the same size where it can be seen and let the
+            # player adjust from there.
+            if (not self.is_color_only and self.mapper is not None
+                    and self._draw_poly and not self._area_corners_on_screen()):
+                self._apply_preset(self._preset_name)
+            else:
+                # Some corners in frame and some out is the worse case: the
+                # screen looks fine, so nothing announces that the area cannot be
+                # finished. Reachability is per corner, not per outline.
+                self._pull_area_corners_into_view()
         elif state == S.CAL_COURSE and not self.layout:
             self.layout = CourseLayout(course_by_id(self.current_course_id), self.setup.play_area)
         elif state in (S.CAL_PLACE, S.HOLE_START):
@@ -858,9 +922,21 @@ class GameEngine:
             if self._draw_poly:
                 self._draw_poly.pop()
             self._dragging = None
+            # Undoing a corner puts you back in drawing, and what is left is no
+            # longer the preset rectangle.
+            self._area_from_preset = False
+            self._area_open = True
         elif action == "clear":
             self._draw_poly = []
             self._dragging = None
+            self._area_from_preset = False
+            self._area_open = True
+        elif action == "secondary":
+            # "Close shape" — the hint has always been on screen for the depth
+            # camera, but nothing acted on it. Ends the outline so further clicks
+            # adjust corners instead of adding more.
+            if not self.is_color_only and len(self._draw_poly) >= 3:
+                self._area_open = False
         elif action == "confirm":
             if self.is_color_only:
                 if len(self._draw_poly) == 4:
@@ -881,13 +957,26 @@ class GameEngine:
         w, h = sizes.get(name, (3.0, 2.0))
         self._preset_w, self._preset_h = w, h
         self._preset_name = name if name in sizes else "medium"
-        self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)]
-        self.setup.start = CircleZone(0.0, 0.0, 0.15)
         # Color-only: the size is the assumed real-world size of the clicked
-        # rectangle. Keep the corners. Depth: seed a floor-space rectangle.
-        if not self.is_color_only:
-            self._draw_poly = list(self.setup.play_area)
-            self._dragging = None
+        # rectangle, so the corners the player clicked must survive.
+        if self.is_color_only:
+            self.setup.play_area = [(-w / 2, -h / 2), (w / 2, -h / 2),
+                                    (w / 2, h / 2), (-w / 2, h / 2)]
+            self.setup.start = CircleZone(0.0, 0.0, 0.15)
+            return
+        # Depth: seed a rectangle on the floor, centred on what the camera can
+        # see rather than on the floor origin — the origin is directly below the
+        # sensor, which is usually out of frame.
+        cx, cy, w, h = self._fit_preset_rect(w, h)
+        self._preset_trimmed = (w < self._preset_w - 0.01
+                                or h < self._preset_h - 0.01)
+        self.setup.play_area = [(cx - w / 2, cy - h / 2), (cx + w / 2, cy - h / 2),
+                                (cx + w / 2, cy + h / 2), (cx - w / 2, cy + h / 2)]
+        self.setup.start = CircleZone(cx, cy, 0.15)
+        self._draw_poly = list(self.setup.play_area)
+        self._dragging = None
+        self._area_from_preset = True
+        self._area_open = False
 
     def _build_homography(self) -> None:
         """Solve the pixel->floor homography from the four clicked corners."""
@@ -1145,7 +1234,7 @@ class GameEngine:
             return None, None
 
     def _set_ghost_corner(self, gidx: int, cidx: int, nx: float, ny: float) -> None:
-        floor = self._feed_to_floor(nx, ny)
+        floor = self._pointer_floor_point(nx, ny)
         if floor is None or not (0 <= gidx < len(self._place_ghosts)):
             return
         g = self._place_ghosts[gidx]
@@ -1161,7 +1250,7 @@ class GameEngine:
             self._dragging = None
             self._drag_anchor = None
             return
-        floor = self._feed_to_floor(nx, ny)
+        floor = self._pointer_floor_point(nx, ny)
         if ptype == "down":
             gidx, cidx = self._parse_place_handle(handle)
             if gidx is None or cidx is None:
@@ -1397,11 +1486,11 @@ class GameEngine:
 
     def _plant_layout_cup(self, confidence: float = 0.94) -> None:
         if self.layout is not None:
-            self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], 0.045)
+            self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], DEFAULT_CUP_R)
         elif self.setup.play_area:
             xs = [p[0] for p in self.setup.play_area]
             ys = [p[1] for p in self.setup.play_area]
-            self.setup.hole = CircleZone(sum(xs) / len(xs), sum(ys) / len(ys), 0.045)
+            self.setup.hole = CircleZone(sum(xs) / len(xs), sum(ys) / len(ys), DEFAULT_CUP_R)
         if self.setup.hole is not None:
             self._cup_confidence = float(confidence)
 
@@ -1461,9 +1550,13 @@ class GameEngine:
         self._ensure_cup()
         if self.setup.hole is None:
             return
-        r = float(np.clip(self.setup.hole.r + delta, 0.03, 0.18))
+        r = self._clamp_cup_r(self.setup.hole.r + delta)
         self.setup.hole = CircleZone(self.setup.hole.x, self.setup.hole.y, r)
         self._draw_circle_r = r
+
+    @staticmethod
+    def _clamp_cup_r(r: float) -> float:
+        return float(np.clip(float(r), CUP_R_MIN, CUP_R_MAX))
 
     def _propose_cup(self, avg: np.ndarray) -> None:
         # The cup is a new static above-floor blob containing a white ring.
@@ -1471,9 +1564,11 @@ class GameEngine:
         # course's expected hole position (or anywhere in the play area).
         if self.plane is None or self.mapper is None:
             return
+        # 1 cm sat under the depth noise floor, so on a real sensor the whole
+        # carpet read as "above the floor". A cup is several centimetres tall.
         proposals = detect_obstacles(avg, self.plane, self.cam, self.mapper,
                                      self.setup.play_area, None,
-                                     min_height_m=0.01, ball_diameter_m=0.02)
+                                     min_height_m=0.02, ball_diameter_m=0.02)
         # Prefer the proposal nearest the template hole.
         best = None
         best_d = 1e9
@@ -1488,7 +1583,7 @@ class GameEngine:
                 best = (cx, cy)
                 best_conf = float(p.get("confidence", 0.85))
         if best is not None:
-            self.setup.hole = CircleZone(best[0], best[1], 0.045)
+            self.setup.hole = CircleZone(best[0], best[1], DEFAULT_CUP_R)
             self._cup_confidence = best_conf
 
     def _propose_cup_color(self, avg_color: np.ndarray) -> None:
@@ -1511,7 +1606,7 @@ class GameEngine:
                 best = (cx, cy)
                 best_conf = float(p.get("confidence", 0.85))
         if best is not None:
-            self.setup.hole = CircleZone(best[0], best[1], 0.045)
+            self.setup.hole = CircleZone(best[0], best[1], DEFAULT_CUP_R)
             self._cup_confidence = best_conf
 
     def _balls_action(self, action: str, msg: dict | None = None) -> None:
@@ -1855,6 +1950,10 @@ class GameEngine:
         if self._draw_poly and not force:
             return
         self._dragging = None
+        # A real area the player already settled on, not a fresh preset: clicks
+        # should adjust its corners, not silently start over.
+        self._area_from_preset = False
+        self._area_open = False
         if self.is_color_only:
             if self.mapper is not None and self.setup.play_area:
                 pts = self._floor_poly_norm(self.setup.play_area)
@@ -1997,14 +2096,181 @@ class GameEngine:
             self._build_homography()
         return self.mapper is not None
 
-    def _feed_to_floor(self, nx: float, ny: float) -> tuple[float, float] | None:
+    def _visible_floor_box(self) -> tuple[float, float, float, float] | None:
+        """Bounds of the floor actually in view, in floor meters.
+
+        The floor origin is the camera dropped straight down onto the floor, so
+        for a sensor aimed across a room it sits at or below the bottom of the
+        frame. Anything seeded around the origin is therefore invisible, and the
+        player sees an empty picture with no rectangle in it. Seeding has to know
+        where the view really lands.
+        """
+        if self.mapper is None:
+            return None
+        w = max(1, self._feed_w)
+        h = max(1, self._feed_h)
+        far = 8.0
+        if self.backend is not None:
+            try:
+                far = max(2.0, float(self.backend.description.reliable_max_m) * 2.0)
+            except Exception:
+                far = 8.0
+
+        depth = self._frame_depth if not self.is_color_only else None
+        steps = 24
+        xs: list[float] = []
+        ys: list[float] = []
+        floor_xs: list[float] = []
+        floor_ys: list[float] = []
+        for iy in range(steps):
+            for ix in range(steps):
+                u = (ix + 0.5) * w / steps
+                v = (iy + 0.5) * h / steps
+                # Where the ray meets the plane. Works with no depth at all, so
+                # it is the reliable baseline.
+                ray = self.mapper.pixel_ray_to_floor(u, v)
+                if ray is not None and abs(ray[0]) <= far and abs(ray[1]) <= far:
+                    xs.append(float(ray[0]))
+                    ys.append(float(ray[1]))
+                if depth is None:
+                    continue
+                z = float(depth[int(v), int(u)])
+                if z <= 200:
+                    continue
+                p3 = self.mapper.depth_pixel_to_3d(u, v, z)
+                # Only points that really are the floor: a chair seat would drag
+                # the box off the part the ball can roll on.
+                if abs(self.mapper.height_above_floor(p3)) > 0.06:
+                    continue
+                fx, fy = self.mapper.project_to_floor(p3)
+                if abs(fx) <= far and abs(fy) <= far:
+                    floor_xs.append(float(fx))
+                    floor_ys.append(float(fy))
+
+        # Measured floor beats the geometric ray box when there is enough of it:
+        # it excludes the wall, and the far half of the frame above the horizon.
+        if len(floor_xs) >= 64:
+            xs, ys = floor_xs, floor_ys
+        if len(xs) < 16:
+            return None
+        ax = np.asarray(xs)
+        ay = np.asarray(ys)
+        # Percentiles, not min/max: rays approaching the horizon meet the plane
+        # arbitrarily far away and would stretch the box to nonsense.
+        return (float(np.percentile(ax, 4)), float(np.percentile(ay, 4)),
+                float(np.percentile(ax, 96)), float(np.percentile(ay, 96)))
+
+    def _corner_clearance(self, cx: float, cy: float,
+                          w: float, h: float) -> float:
+        """Smallest distance from any corner of the rectangle to a frame edge.
+
+        Negative when a corner is outside the picture. Measured by projecting
+        the corners, which is the only test that matches what the player can
+        actually reach: the floor in view is a trapezoid — narrow at the far
+        end, wide near the camera — so a rectangle can sit well inside the
+        *bounds* of the visible floor and still hang its near corners off the
+        left and right of the frame.
+        """
+        if self.mapper is None:
+            return -1.0
+        worst = 1.0
+        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            u, v = self.mapper.floor_to_pixel(cx + sx * w / 2.0, cy + sy * h / 2.0)
+            nx = u / max(1, self._feed_w)
+            ny = v / max(1, self._feed_h)
+            worst = min(worst, nx, ny, 1.0 - nx, 1.0 - ny)
+        return float(worst)
+
+    def _fit_preset_rect(self, w: float, h: float) -> tuple[float, float, float, float]:
+        """Place a w x h rectangle so all four corners are on screen.
+
+        Returns ``(cx, cy, w, h)``, shrinking the rectangle only when no
+        placement of the requested size fits. A corner off the picture cannot be
+        dragged, and an area reaching past the edge of the view cannot be
+        watched for balls either, so trimming it to what the camera can see is
+        the honest answer rather than a limitation to work around.
+        """
+        box = self._visible_floor_box()
+        if box is None or self.mapper is None:
+            return 0.0, 0.0, w, h
+        x0, y0, x1, y1 = box
+        for scale in PRESET_SCALES:
+            sw, sh = w * scale, h * scale
+            best, best_clear = None, PRESET_MARGIN
+            for iy in range(PRESET_GRID):
+                for ix in range(PRESET_GRID):
+                    cx = x0 + (x1 - x0) * (ix + 0.5) / PRESET_GRID
+                    cy = y0 + (y1 - y0) * (iy + 0.5) / PRESET_GRID
+                    clear = self._corner_clearance(cx, cy, sw, sh)
+                    if clear > best_clear:
+                        best, best_clear = (cx, cy), clear
+            if best is not None:
+                return float(best[0]), float(best[1]), float(sw), float(sh)
+        # Nothing fits: centre the smallest attempt and let the player redraw.
+        return ((x0 + x1) / 2.0, (y0 + y1) / 2.0,
+                w * PRESET_SCALES[-1], h * PRESET_SCALES[-1])
+
+    def _far_limit(self) -> float:
+        """How far out a floor point is still worth trusting, in meters."""
+        if self.backend is not None:
+            try:
+                return max(2.0, float(self.backend.description.reliable_max_m) * 2.0)
+            except Exception:
+                pass
+        return 8.0
+
+    def _pointer_floor_point(self, nx: float, ny: float) -> tuple[float, float] | None:
+        """Floor point under the pointer, pulled onto floor the camera can see.
+
+        Above the horizon a viewing ray never meets the floor, and just below it
+        the intersection runs off to hundreds of metres. Returning nothing there
+        left a dragged corner sitting where it was and then snapping back on
+        release; taking the raw intersection threw it clean off the map. Either
+        way the handle stops following the mouse, so the pointer is walked down
+        to the nearest row that does land on reachable floor, and kept inside
+        the frame so the corner it sets stays grabbable.
+        """
+        m = POINTER_MARGIN
+        nx = float(np.clip(nx, m, 1.0 - m))
+        ny = float(np.clip(ny, m, 1.0 - m))
+        near = self._feed_to_floor(nx, ny, on_plane=True)
+        if near is not None and self._within_far_limit(near):
+            return near
+        # Rows below the horizon land on the floor and rows above it do not, so
+        # the boundary can be bisected.
+        lo, hi, best = ny, 1.0 - m, None
+        for _ in range(24):
+            mid = (lo + hi) / 2.0
+            got = self._feed_to_floor(nx, mid, on_plane=True)
+            if got is not None and self._within_far_limit(got):
+                best, hi = got, mid
+            else:
+                lo = mid
+        return best
+
+    def _within_far_limit(self, pt: tuple[float, float]) -> bool:
+        far = self._far_limit()
+        return abs(float(pt[0])) <= far and abs(float(pt[1])) <= far
+
+    def _feed_to_floor(self, nx: float, ny: float,
+                       on_plane: bool = False) -> tuple[float, float] | None:
+        """Normalized feed coordinates to a point on the floor, in meters.
+
+        ``on_plane`` intersects the viewing ray with the fitted floor plane and
+        ignores the measured depth. That is what marking a spot on the floor
+        wants, for two reasons. It round-trips exactly — project the result back
+        with ``floor_to_pixel`` and you land on the pixel that was clicked — so a
+        handle stays under the cursor. And it cannot be captured by whatever
+        happens to be in the way: reading depth at the pixel puts the corner on
+        the surface of a leg or a table edge instead of on the floor behind it.
+        """
         self._ensure_mapper()
         if self.mapper is None:
             return None
         px = nx * self._feed_w
         py = ny * self._feed_h
         # Prefer depth; fall back to ray/homography intersection.
-        if self._frame_depth is not None and not self.is_color_only:
+        if not on_plane and self._frame_depth is not None and not self.is_color_only:
             x = int(np.clip(px, 0, self._feed_w - 1))
             y = int(np.clip(py, 0, self._feed_h - 1))
             z = float(self._frame_depth[y, x])
@@ -2021,7 +2287,44 @@ class GameEngine:
         u, v = self.mapper.floor_to_pixel(pt[0], pt[1])
         return u / max(1, self._feed_w), v / max(1, self._feed_h)
 
-    def _nearest_area_corner(self, nx: float, ny: float, max_d: float = 0.2) -> int | None:
+    def _area_corners_on_screen(self) -> bool:
+        """Is any outline corner actually reachable with the mouse?
+
+        If the sensor was moved since the area was saved, every corner can sit
+        outside the picture. Dragging is then impossible, so a click has to be
+        allowed to start a new outline or the screen is a dead end.
+        """
+        for pt in self._draw_poly:
+            cx, cy = self._corner_feed_xy(pt)
+            if -0.02 <= cx <= 1.02 and -0.02 <= cy <= 1.02:
+                return True
+        return False
+
+    def _pull_area_corners_into_view(self) -> int:
+        """Walk stray outline corners back into the picture, keeping the shape.
+
+        A corner off the edge cannot be grabbed, so an outline saved before the
+        sensor was nudged ends up only half adjustable — the reported dead end,
+        where the far corners were fine and the near ones were past the sides of
+        the frame. Replacing the whole outline would throw away a shape drawn by
+        hand, so each stray corner is moved to the nearest floor still in frame
+        and the rest are left exactly as they were.
+        """
+        if self.is_color_only or self.mapper is None:
+            return 0
+        m = POINTER_MARGIN
+        moved = 0
+        for i, pt in enumerate(list(self._draw_poly)):
+            cx, cy = self._corner_feed_xy(pt)
+            if m <= cx <= 1.0 - m and m <= cy <= 1.0 - m:
+                continue
+            f = self._pointer_floor_point(cx, cy)
+            if f is not None:
+                self._draw_poly[i] = f
+                moved += 1
+        return moved
+
+    def _nearest_area_corner(self, nx: float, ny: float, max_d: float = AREA_GRAB_R) -> int | None:
         best_i, best_d = None, max_d
         for i, pt in enumerate(self._draw_poly):
             cx, cy = self._corner_feed_xy(pt)
@@ -2034,9 +2337,11 @@ class GameEngine:
         if not (0 <= idx < len(self._draw_poly)):
             return
         if self.is_color_only:
-            self._draw_poly[idx] = (nx, ny)
+            m = POINTER_MARGIN
+            self._draw_poly[idx] = (float(np.clip(nx, m, 1.0 - m)),
+                                    float(np.clip(ny, m, 1.0 - m)))
             return
-        f = self._feed_to_floor(nx, ny)
+        f = self._pointer_floor_point(nx, ny)
         if f is not None:
             self._draw_poly[idx] = f
 
@@ -2057,17 +2362,33 @@ class GameEngine:
                 hit = self._nearest_area_corner(nx, ny)
             if hit is not None:
                 self._dragging = ("area", hit)
+                self._area_from_preset = False
                 self._set_area_corner(hit, nx, ny)
                 return
-            if len(self._draw_poly) >= 4:
-                return
             if self.is_color_only:
-                self._draw_poly.append((nx, ny))
-            else:
-                f = self._feed_to_floor(nx, ny)
-                if f is None:
+                # The homography needs exactly four, so a fifth click has to
+                # replace the set rather than extend it.
+                if len(self._draw_poly) >= 4:
                     return
+                self._draw_poly.append((nx, ny))
+                self._dragging = ("area", len(self._draw_poly) - 1)
+                return
+            f = self._pointer_floor_point(nx, ny)
+            if f is None:
+                return
+            if self._area_from_preset or not self._area_corners_on_screen():
+                # Clicking open floor while an untouched preset sits there means
+                # "I want to draw my own", not "add a fifth corner to the
+                # rectangle". Before this the click was silently dropped, which
+                # looked exactly like the screen being broken. Same when no
+                # corner is on screen to drag.
+                self._draw_poly = [f]
+                self._area_from_preset = False
+                self._area_open = True
+            elif self._area_open and len(self._draw_poly) < MAX_AREA_CORNERS:
                 self._draw_poly.append(f)
+            else:
+                return
             self._dragging = ("area", len(self._draw_poly) - 1)
             return
         if ptype == "move":
@@ -2086,41 +2407,46 @@ class GameEngine:
 
     def _pointer_cup(self, ptype: str, nx: float, ny: float, handle: object = None) -> None:
         if ptype in ("up", "cancel"):
-            if self._draw_circle_center is not None and self._draw_circle_r > 0.02:
-                self.setup.hole = CircleZone(self._draw_circle_center[0], self._draw_circle_center[1], self._draw_circle_r)
+            # Only a radius drag commits anything here, and only from the centre
+            # it started at. Committing whenever a centre happened to be left
+            # lying around meant a stale one could drag the cup back across the
+            # floor on an unrelated click.
+            if (self._dragging == ("circle", "radius")
+                    and self._draw_circle_center is not None):
+                self.setup.hole = CircleZone(self._draw_circle_center[0],
+                                             self._draw_circle_center[1],
+                                             self._clamp_cup_r(self._draw_circle_r))
             self._dragging = None
             self._draw_circle_center = None
+            self._draw_circle_r = 0.0
             return
-        f = self._feed_to_floor(nx, ny)
+        f = self._pointer_floor_point(nx, ny)
         if f is None:
             return
         if ptype == "down":
             if self.setup.hole is None:
-                self.setup.hole = CircleZone(f[0], f[1], 0.045)
+                self.setup.hole = CircleZone(f[0], f[1], DEFAULT_CUP_R)
                 self._dragging = ("circle", "center")
                 return
-            u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y) if self.mapper else (0, 0)
-            cx = u / max(1, self._feed_w)
-            cy = v / max(1, self._feed_h)
-            ru = 0.03
-            if self.mapper is not None:
-                ru = self.mapper.radius_to_pixels(self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) / max(1, self._feed_w)
-            handle_hit = handle is not None or float(np.hypot(nx - (cx + ru), ny - cy)) < 0.05
-            if handle_hit:
+            if self._cup_radius_handle_hit(nx, ny, handle):
                 self._dragging = ("circle", "radius")
                 self._draw_circle_center = (self.setup.hole.x, self.setup.hole.y)
-                self._draw_circle_r = max(0.03, float(np.hypot(f[0] - self.setup.hole.x, f[1] - self.setup.hole.y)))
+                self._draw_circle_r = self._clamp_cup_r(
+                    np.hypot(f[0] - self.setup.hole.x, f[1] - self.setup.hole.y))
+                self.setup.hole = CircleZone(self.setup.hole.x, self.setup.hole.y,
+                                             self._draw_circle_r)
                 return
-            if float(np.hypot(nx - cx, ny - cy)) < max(ru + 0.03, 0.06):
-                self._dragging = ("circle", "center")
-                return
+            # Anywhere else means "the hole is here". Clicking inside the zone
+            # used to arm a drag and move nothing, so a click landed on the real
+            # cup and the ring stayed where it was — and the bigger the zone got,
+            # the more of the picture became that dead spot.
             self.setup.hole = CircleZone(f[0], f[1], self.setup.hole.r)
             self._dragging = ("circle", "center")
             return
         if ptype == "move" and self._dragging and self._dragging[0] == "circle":
             mode = self._dragging[1]
             if mode == "center":
-                r = self.setup.hole.r if self.setup.hole else 0.045
+                r = self.setup.hole.r if self.setup.hole else DEFAULT_CUP_R
                 self.setup.hole = CircleZone(f[0], f[1], r)
             elif mode == "radius":
                 c = self._draw_circle_center
@@ -2128,12 +2454,31 @@ class GameEngine:
                     c = (self.setup.hole.x, self.setup.hole.y)
                 if c is None:
                     return
-                self._draw_circle_r = max(0.03, float(np.hypot(f[0] - c[0], f[1] - c[1])))
+                self._draw_circle_r = self._clamp_cup_r(
+                    np.hypot(f[0] - c[0], f[1] - c[1]))
                 self.setup.hole = CircleZone(c[0], c[1], self._draw_circle_r)
+
+    def _cup_radius_handle_hit(self, nx: float, ny: float, handle: object) -> bool:
+        """Is this click on the cream resize dot rather than the floor?
+
+        The dot is drawn one zone-radius to the right of the centre, measured in
+        fractions of the frame *width* for both axes, so the hit test has to be
+        too — the overlay is stretched to the picture, not square.
+        """
+        if handle is not None:
+            return True
+        if self.mapper is None or self.setup.hole is None:
+            return False
+        u, v = self.mapper.floor_to_pixel(self.setup.hole.x, self.setup.hole.y)
+        cx = u / max(1, self._feed_w)
+        cy = v / max(1, self._feed_h)
+        ru = self.mapper.radius_to_pixels(
+            self.setup.hole.x, self.setup.hole.y, self.setup.hole.r) / max(1, self._feed_w)
+        return float(np.hypot(nx - (cx + ru), ny - cy)) < CUP_HANDLE_GRAB_R
 
     def _pointer_obstacles(self, ptype: str, nx: float, ny: float,
                            handle: object = None, shift: bool = False) -> None:
-        f = self._feed_to_floor(nx, ny)
+        f = self._pointer_floor_point(nx, ny)
         if ptype in ("up", "cancel"):
             self._dragging = None
             return
@@ -2401,7 +2746,7 @@ class GameEngine:
     def _pointer_putt(self, nx: float, ny: float) -> None:
         if self._putt is not None:
             return
-        target = self._feed_to_floor(nx, ny)
+        target = self._feed_to_floor(nx, ny, on_plane=True)
         if target is None:
             return
         ball_id = self._active_ball_id()
@@ -2733,7 +3078,7 @@ class GameEngine:
         self.setup.start = CircleZone(s["x"], s["y"], s.get("r", 0.15))
         # Mock: move the physical cup to the new course's hole.
         if self._rebuilding and self.is_mock and self.layout is not None:
-            self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], 0.045)
+            self.setup.hole = CircleZone(self.layout.hole[0], self.layout.hole[1], DEFAULT_CUP_R)
         # Keep the last seen webcam positions. Only the mock tees off for you.
         for i, p in enumerate(self.players):
             ball_id = self.ball_for_player.get(p.id, f"ball{i}")
@@ -3174,8 +3519,8 @@ class GameEngine:
         if st == S.CAL_CUP:
             h = self.setup.hole
             return {"step": 4, "has_hole": h is not None,
-                    "hole_r_cm": round((h.r if h else 0.045) * 100),
-                    "hole_d_cm": round((h.r if h else 0.045) * 200),
+                    "hole_r_cm": round((h.r if h else DEFAULT_CUP_R) * 100),
+                    "hole_d_cm": round((h.r if h else DEFAULT_CUP_R) * 200),
                     "searching": bool(self._cup_searching),
                     "found": h is not None and not self._cup_searching,
                     "manual": bool(self._cup_manual),
@@ -3596,15 +3941,45 @@ class GameEngine:
     def _norm(self, px: float, py: float) -> list[float]:
         return [round(px / max(1, self._feed_w), 4), round(py / max(1, self._feed_h), 4)]
 
+    def _draft_area_size(self) -> tuple[float, float]:
+        """Size of the outline being edited.
+
+        With depth this is measured off the corners, so dragging one updates the
+        number. Color-only has no scale of its own — there the preset *is* the
+        declared real size of the rectangle the player clicked.
+        """
+        if not self.is_color_only and len(self._draw_poly) >= 2:
+            xs = [p[0] for p in self._draw_poly]
+            ys = [p[1] for p in self._draw_poly]
+            return max(xs) - min(xs), max(ys) - min(ys)
+        return self._preset_w, self._preset_h
+
+    def _area_hint_text(self, n: int, size_txt: str) -> str:
+        if self.is_color_only:
+            return (f"{n} of 4 corners · this rectangle is {size_txt}"
+                    if n else f"Click the four corners of a {size_txt} rectangle")
+        if not n:
+            return "Click around the edge of your course"
+        if self._area_from_preset:
+            if self._preset_trimmed:
+                return (f"{size_txt} — trimmed to the floor this camera can see. "
+                        f"Drag a corner, or click the floor to draw your own")
+            return (f"{size_txt} · drag a corner to fit your floor, "
+                    f"or click the floor to draw your own")
+        if self._area_open:
+            return (f"{n} corner{'s' if n != 1 else ''} · {size_txt} · keep "
+                    f"clicking, or Close shape when the outline is done")
+        return f"{n} corners · {size_txt} · drag a corner to adjust"
+
     def _overlay_cal_area(self) -> dict:
         o = {"shapes": []}
         pts = [list(self._corner_feed_xy(pt)) for pt in self._draw_poly]
         n = len(pts)
-        size_txt = f"{self._preset_w:g} × {self._preset_h:g} m"
+        aw, ah = self._draft_area_size()
+        size_txt = f"{aw:.1f} × {ah:.1f} m"
         o["shapes"].append({
             "type": "label", "x": 0.5, "y": 0.055,
-            "text": (f"{n} of 4 corners · this rectangle is {size_txt}"
-                     if n else f"Click the four corners of a {size_txt} rectangle"),
+            "text": self._area_hint_text(n, size_txt),
             "fill": "#8be9c3", "size": 0.026, "anchor": "middle",
             "id": "area_hint",
         })
@@ -3628,7 +4003,7 @@ class GameEngine:
                 "id": f"corner{i}",
             })
         if n >= 4:
-            o["shapes"].extend(self._rect_dimension_labels(pts, self._preset_w, self._preset_h))
+            o["shapes"].extend(self._rect_dimension_labels(pts, aw, ah))
         return o
 
     def _rect_dimension_labels(self, pts: list[list[float]], width_m: float, height_m: float) -> list[dict]:
@@ -3712,7 +4087,7 @@ class GameEngine:
             if self.setup.hole is None and self.layout is not None:
                 hx, hy = self.layout.hole
                 u, v = self.mapper.floor_to_pixel(hx, hy)
-                ru = self.mapper.radius_to_pixels(hx, hy, 0.045)
+                ru = self.mapper.radius_to_pixels(hx, hy, DEFAULT_CUP_R)
                 o["shapes"].append({"type": "circle",
                                     "x": u / self._feed_w, "y": v / self._feed_h,
                                     "r": ru / self._feed_w, "stroke": "#8be9c3",
@@ -3760,7 +4135,14 @@ class GameEngine:
                 cup_label = None
                 if st == S.CAL_CUP and not self._cup_searching:
                     cm = round(self.setup.hole.r * 200)
-                    cup_label = f"Hole zone · Ø {cm} cm · confidence {self._cup_confidence:.2f}"
+                    cup_label = f"Hole zone · Ø {cm} cm"
+                    # A zone the player put there by hand has no confidence to
+                    # report, and "confidence 0.00" beside their own click reads
+                    # as the software calling it wrong.
+                    if self._cup_confidence > 0.0:
+                        cup_label += f" · confidence {self._cup_confidence:.2f}"
+                    else:
+                        cup_label += " · placed by hand"
                 o["shapes"].append({
                     "type": "circle", "x": hx, "y": hy, "r": hr,
                     "stroke": "#8be9c3", "stroke_width": 5,
@@ -3932,7 +4314,15 @@ class GameEngine:
     # Frame encoding for the websocket
     # ===================================================================== #
     def _px(self, px: float) -> float:
-        return float(px) / max(1.0, float(self._feed_w))
+        """A design pixel as a fraction of the feed width.
+
+        Measured against the 1920-wide design space, not the sensor: the overlay
+        is drawn over the picture at whatever size the browser lays it out, so
+        the sensor's own resolution has nothing to do with how big a handle
+        should look. Dividing by the frame width made every marker 3x oversized
+        on a 640-wide Kinect and correct only on a 1920-wide webcam.
+        """
+        return float(px) / DESIGN_W
 
     def _capture_finish_still(self) -> None:
         if self._frame_color is None:
